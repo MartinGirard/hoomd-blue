@@ -270,7 +270,7 @@ gpu_compute_pair_fep_shared_kernel(Scalar4* d_force,
                 Scalar rsq = dot(dx, dx);
 
                 // access the per type pair parameters
-                if(override == -1) {
+                if(override == std::numeric_limits<typeof(m_type_override)>::max()) {
                     unsigned int typpair
                             = typpair_idx(__scalar_as_int(postypei.w),
                                           __scalar_as_int(postypej.w));

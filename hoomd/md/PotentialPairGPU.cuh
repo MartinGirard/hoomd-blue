@@ -35,9 +35,9 @@ namespace kernel
 //! Maximum number of threads (width of a warp)
 // currently this is hardcoded, we should set it to the max of platforms
 #if defined(__HIP_PLATFORM_NVCC__)
-const int gpu_pair_force_max_tpp = 32;
+const int gpu_pair_FEP_max_tpp = 32;
 #elif defined(__HIP_PLATFORM_HCC__)
-const int gpu_pair_force_max_tpp = 64;
+const int gpu_pair_FEP_max_tpp = 64;
 #endif
 
 //! Wraps arguments to gpu_cgpf
@@ -409,7 +409,7 @@ template<typename T> int get_max_block_size(T func)
     hipFuncGetAttributes(&attr, (const void*)func);
     int max_threads = attr.maxThreadsPerBlock;
     // number of threads has to be multiple of warp size
-    max_threads -= max_threads % gpu_pair_force_max_tpp;
+    max_threads -= max_threads % gpu_pair_FEP_max_tpp;
     return max_threads;
     }
 
@@ -598,21 +598,21 @@ gpu_compute_pair_forces(const pair_args_t& pair_args,
                 {
             case 0:
                 {
-                PairForceComputeKernel<evaluator, 0, 1, gpu_pair_force_max_tpp>::launch(pair_args,
+                PairForceComputeKernel<evaluator, 0, 1, gpu_pair_FEP_max_tpp>::launch(pair_args,
                                                                                         range,
                                                                                         d_params);
                 break;
                 }
             case 1:
                 {
-                PairForceComputeKernel<evaluator, 1, 1, gpu_pair_force_max_tpp>::launch(pair_args,
+                PairForceComputeKernel<evaluator, 1, 1, gpu_pair_FEP_max_tpp>::launch(pair_args,
                                                                                         range,
                                                                                         d_params);
                 break;
                 }
             case 2:
                 {
-                PairForceComputeKernel<evaluator, 2, 1, gpu_pair_force_max_tpp>::launch(pair_args,
+                PairForceComputeKernel<evaluator, 2, 1, gpu_pair_FEP_max_tpp>::launch(pair_args,
                                                                                         range,
                                                                                         d_params);
                 break;
@@ -627,21 +627,21 @@ gpu_compute_pair_forces(const pair_args_t& pair_args,
                 {
             case 0:
                 {
-                PairForceComputeKernel<evaluator, 0, 0, gpu_pair_force_max_tpp>::launch(pair_args,
+                PairForceComputeKernel<evaluator, 0, 0, gpu_pair_FEP_max_tpp>::launch(pair_args,
                                                                                         range,
                                                                                         d_params);
                 break;
                 }
             case 1:
                 {
-                PairForceComputeKernel<evaluator, 1, 0, gpu_pair_force_max_tpp>::launch(pair_args,
+                PairForceComputeKernel<evaluator, 1, 0, gpu_pair_FEP_max_tpp>::launch(pair_args,
                                                                                         range,
                                                                                         d_params);
                 break;
                 }
             case 2:
                 {
-                PairForceComputeKernel<evaluator, 2, 0, gpu_pair_force_max_tpp>::launch(pair_args,
+                PairForceComputeKernel<evaluator, 2, 0, gpu_pair_FEP_max_tpp>::launch(pair_args,
                                                                                         range,
                                                                                         d_params);
                 break;

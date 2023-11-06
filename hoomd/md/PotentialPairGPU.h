@@ -43,7 +43,7 @@ namespace md
 
     \sa export_PotentialPairGPU()
 */
-template<class evaluator> class PotentialPairGPU : public PotentialPair<evaluator>
+template<class evaluator> class PotentialPairGPU : public virtual PotentialPair<evaluator>
     {
     public:
     //! Construct the pair potential

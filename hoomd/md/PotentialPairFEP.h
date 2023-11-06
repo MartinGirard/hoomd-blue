@@ -43,7 +43,7 @@ namespace hoomd
 namespace md
     {
 
-template<class evaluator> class PotentialPairFEP : public PotentialPair<evaluator>
+template<class evaluator> class PotentialPairFEP : public virtual PotentialPair<evaluator>
     {
     public:
 
@@ -56,7 +56,7 @@ template<class evaluator> class PotentialPairFEP : public PotentialPair<evaluato
     virtual ~PotentialPairFEP();
 
     std::string get_type_override() const{
-        if(m_type_override != -1)
+        if(m_type_override != std::numeric_limits<typeof(m_type_override)>::max())
             return this->m_pdata->getNameByType(m_type_override);
         else
             return std::string("");
@@ -64,13 +64,13 @@ template<class evaluator> class PotentialPairFEP : public PotentialPair<evaluato
 
     void set_type_override(std::string type){
         if(type == ""){
-            m_type_override = -1;
+            m_type_override = std::numeric_limits<typeof(m_type_override)>::max();
         }else{
             m_type_override = this->m_pdata->getTypeByName(type);
         }
     }
 
-    float get_charge_override() const{
+    Scalar get_charge_override() const{
         return m_charge_override;
     }
 
@@ -165,11 +165,12 @@ template<class evaluator> void PotentialPairFEP<evaluator>::computeForces(uint64
             // access the particle's position and type (MEM TRANSFER: 4 scalars)
             Scalar3 pi = make_scalar3(h_pos.data[i].x, h_pos.data[i].y,
                                       h_pos.data[i].z);
-            if(m_type_override != -1) {
-                unsigned int typei = m_type_override;//__scalar_as_int(h_pos.data[i].w);
+            unsigned int typei;
+            if(m_type_override != std::numeric_limits<typeof(m_type_override)>::max()) {
+                typei = m_type_override;
             }
             else{
-                unsigned int typei = __scalar_as_int(h_pos.data[i].w);
+                typei = __scalar_as_int(h_pos.data[i].w);
             }
 
             // sanity check
@@ -301,7 +302,7 @@ namespace detail
 */
 template<class T> void export_PotentialPairFEP(pybind11::module& m, const std::string& name)
     {
-    pybind11::class_<PotentialPairFEP<T>, PotentialPairFEP<T>, std::shared_ptr<PotentialPairFEP<T>>>
+    pybind11::class_<PotentialPairFEP<T>, PotentialPair<T>, std::shared_ptr<PotentialPairFEP<T>>>
         potentialpairFEP(m, name.c_str());
     potentialpairFEP
         .def(pybind11::init<std::shared_ptr<SystemDefinition>, std::shared_ptr<NeighborList>, unsigned int, Scalar>())

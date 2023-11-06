@@ -62,7 +62,10 @@ PotentialPairFEPGPU<evaluator>::PotentialPairFEPGPU(std::shared_ptr<SystemDefini
                                               std::shared_ptr<NeighborList> nlist,
                                               unsigned int override,
                                               Scalar charge_override)
-    : PotentialPairFEP<evaluator>(sysdef, nlist, override, charge_override), PotentialPairGPU<evaluator>(sysdef, nlist)
+    :PotentialPair<evaluator>(sysdef, nlist),
+        PotentialPairFEP<evaluator>(sysdef, nlist, override, charge_override),
+            PotentialPairGPU<evaluator>(sysdef, nlist)
+
     {
     }
 
@@ -116,10 +119,8 @@ template<class evaluator> void PotentialPairFEPGPU<evaluator>::computeForces(uin
     unsigned int block_size = param[0];
     unsigned int threads_per_particle = param[1];
 
-    kernel::gpu_compute_pair_forces<evaluator>(
+    kernel::gpu_compute_pair_fep_forces<evaluator>(
         kernel::pair_fep_args_t(d_force.data,
-                            d_virial.data,
-                            this->m_virial.getPitch(),
                             this->m_pdata->getN(),
                             this->m_pdata->getMaxN(),
                             d_pos.data,
