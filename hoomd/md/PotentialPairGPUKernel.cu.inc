@@ -6,6 +6,7 @@
 
 // clang-format off
 #include "hoomd/md/PotentialPairGPU.cuh"
+#include "hoomd/md/PotentialPairFEPGPU.cuh"
 #include "hoomd/md/EvaluatorPair@_evaluator_cpp@.h"
 
 #define EVALUATOR_CLASS EvaluatorPair@_evaluator_cpp@
@@ -20,6 +21,10 @@ namespace kernel
 template __attribute__((visibility("default"))) hipError_t
 gpu_compute_pair_forces<EVALUATOR_CLASS>(const pair_args_t& pair_args,
                                          const EVALUATOR_CLASS::param_type* d_params);
+
+    template __attribute__((visibility("default"))) hipError_t
+            gpu_compute_pair_fep_forces<EVALUATOR_CLASS>(const pair_fep_args_t& pair_args,
+    const EVALUATOR_CLASS::param_type* d_params);
     } // end namespace kernel
     } // end namespace md
     } // end namespace hoomd

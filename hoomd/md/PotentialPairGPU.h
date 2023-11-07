@@ -181,7 +181,7 @@ template<class T> void export_PotentialPairGPU(pybind11::module& m, const std::s
     {
     pybind11::class_<PotentialPairGPU<T>, PotentialPair<T>, std::shared_ptr<PotentialPairGPU<T>>>(
         m,
-        name.c_str())
+        name.c_str(), pybind11::multiple_inheritance())
         .def(pybind11::init<std::shared_ptr<SystemDefinition>, std::shared_ptr<NeighborList>>());
     }
 

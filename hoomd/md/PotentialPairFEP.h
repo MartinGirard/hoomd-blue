@@ -51,9 +51,14 @@ template<class evaluator> class PotentialPairFEP : public virtual PotentialPair<
     PotentialPairFEP(std::shared_ptr<SystemDefinition> sysdef,
                      std::shared_ptr<NeighborList> nlist,
                      unsigned int type_override,
-                     Scalar charge_override);
+                     Scalar charge_override): PotentialPair<evaluator>(sysdef, nlist), m_type_override(type_override), m_charge_override(charge_override)
+    {
+        this->m_exec_conf->msg->notice(5) << "Constructing PotentialPairFEP<" << evaluator::getName() << ">"
+                                          << std::endl;
+    }
+
     //! Destructor
-    virtual ~PotentialPairFEP();
+    virtual ~PotentialPairFEP(){ }
 
     std::string get_type_override() const{
         if(m_type_override != std::numeric_limits<typeof(m_type_override)>::max())
@@ -92,25 +97,6 @@ template<class evaluator> class PotentialPairFEP : public virtual PotentialPair<
 
     }; // end class PotentialPair
 
-/*! \param sysdef System to compute forces on
-    \param nlist Neighborlist to use for computing the forces
-*/
-template<class evaluator>
-PotentialPairFEP<evaluator>::PotentialPairFEP(std::shared_ptr<SystemDefinition> sysdef,
-                                        std::shared_ptr<NeighborList> nlist,
-                                        unsigned int type_override,
-                                        Scalar charge_override)
-    : PotentialPair<evaluator>(sysdef, nlist), m_type_override(type_override), m_charge_override(charge_override)
-    {
-    this->m_exec_conf->msg->notice(5) << "Constructing PotentialPairFEP<" << evaluator::getName() << ">"
-                                << std::endl;
-    }
-
-template<class evaluator> PotentialPairFEP<evaluator>::~PotentialPairFEP()
-    {
-    this->m_exec_conf->msg->notice(5) << "Destroying PotentialPairFEP<" << evaluator::getName() << ">"
-                                << std::endl;
-    }
 
 /*! \post The FEP is computed for the given timestep. The neighborlist's compute method is
    called to ensure that it is up to date before proceeding.
@@ -302,9 +288,7 @@ namespace detail
 */
 template<class T> void export_PotentialPairFEP(pybind11::module& m, const std::string& name)
     {
-    pybind11::class_<PotentialPairFEP<T>, PotentialPair<T>, std::shared_ptr<PotentialPairFEP<T>>>
-        potentialpairFEP(m, name.c_str());
-    potentialpairFEP
+    pybind11::class_<PotentialPairFEP<T>, PotentialPair<T>, std::shared_ptr<PotentialPairFEP<T>>>(m, name.c_str(), pybind11::multiple_inheritance())
         .def(pybind11::init<std::shared_ptr<SystemDefinition>, std::shared_ptr<NeighborList>, unsigned int, Scalar>())
         .def_property("charge_value", &PotentialPairFEP<T>::get_charge_override, &PotentialPairFEP<T>::set_charge_override)
         .def_property("type_override", &PotentialPairFEP<T>::get_type_override, &PotentialPairFEP<T>::set_type_override);

@@ -166,6 +166,9 @@ set(_md_headers ActiveForceComputeGPU.h
                 PotentialPairGPU.h
                 PotentialPairGPU.cuh
                 PotentialPair.h
+        PotentialPairFEPGPU.h
+        PotentialPairFEPGPU.cuh
+        PotentialPairFEP.h
                 PotentialSpecialPairGPU.h
                 PotentialSpecialPair.h
                 PotentialTersoffGPU.h

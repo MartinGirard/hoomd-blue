@@ -48,26 +48,21 @@ template<class evaluator> class PotentialPairFEPGPU : public PotentialPairFEP<ev
     {
     public:
     //! Construct the pair potential
-    PotentialPairFEPGPU(std::shared_ptr<SystemDefinition> sysdef, std::shared_ptr<NeighborList> nlist, unsigned int override, Scalar charge_override);
+    PotentialPairFEPGPU(std::shared_ptr<SystemDefinition> sysdef, std::shared_ptr<NeighborList> nlist, unsigned int override, Scalar charge_override):
+    PotentialPair<evaluator>(sysdef, nlist),
+    PotentialPairFEP<evaluator>(sysdef, nlist, override, charge_override),
+    PotentialPairGPU<evaluator>(sysdef, nlist)
+
+    {
+    };
     //! Destructor
-    virtual ~PotentialPairFEPGPU() {}
+    virtual ~PotentialPairFEPGPU() { }
 
 
     //! Actually compute the forces
     virtual void computeForces(uint64_t timestep);
     };
 
-template<class evaluator>
-PotentialPairFEPGPU<evaluator>::PotentialPairFEPGPU(std::shared_ptr<SystemDefinition> sysdef,
-                                              std::shared_ptr<NeighborList> nlist,
-                                              unsigned int override,
-                                              Scalar charge_override)
-    :PotentialPair<evaluator>(sysdef, nlist),
-        PotentialPairFEP<evaluator>(sysdef, nlist, override, charge_override),
-            PotentialPairGPU<evaluator>(sysdef, nlist)
-
-    {
-    }
 
 template<class evaluator> void PotentialPairFEPGPU<evaluator>::computeForces(uint64_t timestep)
     {
@@ -164,7 +159,7 @@ template<class T> void export_PotentialPairFEPGPU(pybind11::module& m, const std
     {
     pybind11::class_<PotentialPairFEPGPU<T>, PotentialPairFEP<T>, PotentialPairGPU<T>, std::shared_ptr<PotentialPairFEPGPU<T>>>(
         m,
-        name.c_str())
+        name.c_str(), pybind11::multiple_inheritance())
         .def(pybind11::init<std::shared_ptr<SystemDefinition>, std::shared_ptr<NeighborList>, unsigned int, Scalar>());
     }
 
