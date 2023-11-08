@@ -25,7 +25,22 @@
 
 #include <assert.h>
 #include <type_traits>
+
+#ifndef HOSTDEVICE
+#define HOSTDEVICE __host__ __device__
+#endif
+
 namespace hoomd::md {
+
+    template<typename T>
+    T HOSTDEVICE load(T* a){
+#ifdef __HIPCC__
+        return __ldg(a);
+#else
+        return *a;
+#endif
+    };
+
     struct NeighborData {
         const unsigned int *d_n_neigh;
         const unsigned int *d_nlist;
@@ -33,43 +48,36 @@ namespace hoomd::md {
     };
 
     struct PairIterator {
-        PairIterator(const NeighborData, unsigned tid, unsigned int idx, unsigned _tpp) : tpp(_tpp)  {
+        HOSTDEVICE PairIterator(const NeighborData, unsigned tid, unsigned int idx, unsigned _tpp) : tpp(_tpp)  {
             n_neigh = data.d_n_neigh[idx];
             my_head = data.d_head_list[idx];
-            cur_j = tid % tpp < n_neigh ? __ldg(data.d_nlist + my_head + tid % tpp) : 0;
+            cur_j = tid % tpp < n_neigh ? load(data.d_nlist + my_head + tid % tpp) : 0;
         }
 
-        PairIterator &operator++() {
-
+        HOSTDEVICE PairIterator operator++() {
             if (neigh_idx + tpp < n_neigh) {
-                cur_j = __ldg(data.d_nlist + my_head + neigh_idx + tpp);
+                cur_j = load(data.d_nlist + my_head + neigh_idx + tpp);
             }
             neigh_idx++;
             return *this;
         }
 
-        unsigned int &operator->() {
+        HOSTDEVICE PairIterator operator++(int) {
+            PairIterator r = *this;
+            this->operator++();
+            return r;
+        }
+
+        HOSTDEVICE unsigned int &operator->() {
             return cur_j;
         }
 
-        unsigned int operator*() const {
+        HOSTDEVICE unsigned int operator*() const {
             return cur_j;
         }
 
-        unsigned int begin() {
-            return 0;
-        }
-
-        unsigned int end() {
-            return n_neigh;
-        }
-
-        bool operator==(const PairIterator<tpp> &rhs) {
-            return neigh_idx == rhs.neigh_idx;
-        }
-
-        bool operator!=(const PairIterator<tpp> &rhs) {
-            return neigh_idx != rhs.neigh_idx;
+        HOSTDEVICE bool valid() const{
+            return neigh_idx < n_neigh;
         }
 
 
@@ -88,38 +96,47 @@ namespace hoomd::md {
         const Scalar *ron;
     };
 
+    struct Virial{
+        Scalar xx, yy, zz, xy, xz, yz;
+    };
+
     struct BaseInteraction{
-        BaseInteraction(PairParticleData pdada) : m_pdata(pdada){}
+        HOSTDEVICE BaseInteraction(PairParticleData pdada) : m_pdata(pdada){}
     protected:
         PairParticleData m_pdata;
     };
 
+
     struct DefaultPairInteraction : public BaseInteraction{
 
-        DefaultPairInteraction(PairParticleData pdata) : BaseInteraction(pdata){}
+        HOSTDEVICE DefaultPairInteraction(PairParticleData pdata) : BaseInteraction(pdata){}
 
         template<class evaluator, unsigned shift_mode, bool compute_virial>
-        Scalar4 operator()(PairIterator &it,
-                           Indexer2D &typpair_idx,
-                           unsigned idx,
-                           typename evaluator::param_type* forcefield) {
+        auto HOSTDEVICE operator()(PairIterator &it, // iterator over neighbors
+                           Index2D& typpair_idx, // Index2D to access pair values
+                           unsigned idx, // particle index we are computing
+                           const typename evaluator::param_type* forcefield, // force-field parameters
+                           void* extra) // required extra stuff
+                           {
             Scalar4 force = {0., 0., 0., 0.};
+            Virial v;
             // read in the position of our particle.
-            Scalar4 postypei = __ldg(m_pdata.d_pos + idx);
+            Scalar4 postypei = load(m_pdata.d_pos + idx);
             Scalar3 posi = make_scalar3(postypei.x, postypei.y, postypei.z);
 
             Scalar qi = Scalar(0);
             if (evaluator::needsCharge())
-                qi = __ldg(m_pdata.d_charge + idx);
+                qi = load(m_pdata.d_charge + idx);
 
-            for (auto &cur_j: it) {
+            for (; it.valid(); it++) {
+                auto cur_j = *it;
                 // get the neighbor's position
-                Scalar4 postypej = __ldg(m_pdata.d_pos + cur_j);
+                Scalar4 postypej = load(m_pdata.d_pos + cur_j);
                 Scalar3 posj = make_scalar3(postypej.x, postypej.y, postypej.z);
 
                 Scalar qj = Scalar(0.0);
                 if (evaluator::needsCharge())
-                    qj = __ldg(m_pdata.d_charge + cur_j);
+                    qj = load(m_pdata.d_charge + cur_j);
 
                 // calculate dr (with periodic boundary conditions)
                 Scalar3 dx = posi - posj;
@@ -133,6 +150,7 @@ namespace hoomd::md {
                 // access the per type pair parameters
                 unsigned int typpair = typpair_idx(__scalar_as_int(postypei.w),
                                                    __scalar_as_int(postypej.w));
+
                 Scalar ronsq = *(m_pdata.ron+typpair);
                 Scalar rcutsq = *(m_pdata.rcutsq + typpair);
                 // design specifies that energies are shifted if
@@ -186,12 +204,12 @@ namespace hoomd::md {
                 // calculate the virial
                 if (compute_virial) {
                     Scalar force_div2r = Scalar(0.5) * force_divr;
-                    virialxx += dx.x * dx.x * force_div2r;
-                    virialxy += dx.x * dx.y * force_div2r;
-                    virialxz += dx.x * dx.z * force_div2r;
-                    virialyy += dx.y * dx.y * force_div2r;
-                    virialyz += dx.y * dx.z * force_div2r;
-                    virialzz += dx.z * dx.z * force_div2r;
+                    v.xx += dx.x * dx.x * force_div2r;
+                    v.xy += dx.x * dx.y * force_div2r;
+                    v.xz += dx.x * dx.z * force_div2r;
+                    v.yy += dx.y * dx.y * force_div2r;
+                    v.yz += dx.y * dx.z * force_div2r;
+                    v.zz += dx.z * dx.z * force_div2r;
                 }
 
                 // add up the force vector components
@@ -203,7 +221,7 @@ namespace hoomd::md {
             }
             // potential energy per particle must be halved
             force.w *= Scalar(0.5);
-            return force;
+            return std::make_pair(force, v);
         }
 
     };

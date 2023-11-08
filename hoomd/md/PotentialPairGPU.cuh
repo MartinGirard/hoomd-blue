@@ -239,16 +239,17 @@ gpu_compute_pair_forces_shared_kernel(Scalar4* d_force,
         PairIterator iterator(n, threadIdx.x, idx, tpp);
 
         PairParticleData pdata{
-            .d_charge = d_charge,
             .d_pos = d_pos,
+            .d_charge = d_charge,
+            .box = box,
             .rcutsq = enable_shared_cache ? s_rcutsq : d_rcutsq,
-            .ron = shift_mode == 2 ? (enable_shared_cache ? s_ronsq : d_ronsq) : 0,
-            .box = box
+            .ron = shift_mode == 2 ? (enable_shared_cache ? s_ronsq : d_ronsq) : 0
         };
-
-
-        force = Interaction(pdata)(iterator, typpair_idx, idx, enable_shared_cache ? s_params : d_params);
-
+        auto FEval = Interaction(pdata);
+        auto params = enable_shared_cache ? s_params : d_params;
+        auto E = FEval.template operator()<evaluator, shift_mode, compute_virial>(iterator, typpair_idx, idx, params, nullptr);
+        force = E.first;
+        Virial V = E.second;
         }
 
     // reduce force over threads in cta
