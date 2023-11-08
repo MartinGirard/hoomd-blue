@@ -18,7 +18,7 @@
 
 #include <assert.h>
 #include <type_traits>
-
+#include "GPUPairIterator.cuh"
 /*! \file PotentialPairGPU.cuh
     \brief Defines templated GPU kernel code for calculating the pair forces.
 */
@@ -230,144 +230,30 @@ gpu_compute_pair_forces_shared_kernel(Scalar4* d_force,
 
     if (active)
         {
-        // load in the length of the neighbor list
-        unsigned int n_neigh = d_n_neigh[idx];
+        NeighborData n{
+            .d_n_neigh  = d_n_neigh,
+            .d_nlist = d_nlist,
+            .d_head_list = d_head_list,
+        };
+        PairIterator<tpp> iterator(n, threadIdx.x, idx);
 
-        // read in the position of our particle.
-        Scalar4 postypei = __ldg(d_pos + idx);
-        Scalar3 posi = make_scalar3(postypei.x, postypei.y, postypei.z);
+        PairFFData<typename evaluator::param_type> force_field{
+            .param = enable_shared_cache ? s_params : d_params,
+            .rcutsq = enable_shared_cache ? s_rcutsq : d_rcutsq,
+            .ron = shift_mode == 2 ? (enable_shared_cache ? s_ronsq : d_ronsq) : 0,
+        };
 
-        Scalar qi = Scalar(0);
-        if (evaluator::needsCharge())
-            qi = __ldg(d_charge + idx);
-
-        size_t my_head = d_head_list[idx];
-        unsigned int cur_j = 0;
-
-        unsigned int next_j(0);
-        next_j = threadIdx.x % tpp < n_neigh ? __ldg(d_nlist + my_head + threadIdx.x % tpp) : 0;
 
         // loop over neighbors
-        for (int neigh_idx = threadIdx.x % tpp; neigh_idx < n_neigh; neigh_idx += tpp)
+        for (auto&& cur_j : iterator)
             {
                 {
-                // read the current neighbor index
-                cur_j = next_j;
-                if (neigh_idx + tpp < n_neigh)
-                    {
-                    next_j = __ldg(d_nlist + my_head + neigh_idx + tpp);
-                    }
-                // get the neighbor's position
-                Scalar4 postypej = __ldg(d_pos + cur_j);
-                Scalar3 posj = make_scalar3(postypej.x, postypej.y, postypej.z);
 
-                Scalar qj = Scalar(0.0);
-                if (evaluator::needsCharge())
-                    qj = __ldg(d_charge + cur_j);
 
-                // calculate dr (with periodic boundary conditions)
-                Scalar3 dx = posi - posj;
 
-                // apply periodic boundary conditions
-                dx = box.minImage(dx);
 
-                // calculate r squared
-                Scalar rsq = dot(dx, dx);
 
-                // access the per type pair parameters
-                unsigned int typpair
-                    = typpair_idx(__scalar_as_int(postypei.w), __scalar_as_int(postypej.w));
-                Scalar rcutsq;
-                const typename evaluator::param_type* param = nullptr;
-                Scalar ronsq = Scalar(0.0);
 
-                if (enable_shared_cache)
-                    {
-                    rcutsq = s_rcutsq[typpair];
-                    param = s_params + typpair;
-
-                    if (shift_mode == 2)
-                        ronsq = s_ronsq[typpair];
-                    }
-                else
-                    {
-                    rcutsq = d_rcutsq[typpair];
-                    param = d_params + typpair;
-
-                    if (shift_mode == 2)
-                        ronsq = d_ronsq[typpair];
-                    }
-
-                // design specifies that energies are shifted if
-                // 1) shift mode is set to shift
-                // or 2) shift mode is explor and ron > rcut
-                bool energy_shift = false;
-                if (shift_mode == 1)
-                    energy_shift = true;
-                else if (shift_mode == 2)
-                    {
-                    if (ronsq > rcutsq)
-                        energy_shift = true;
-                    }
-
-                // evaluate the potential
-                Scalar force_divr = Scalar(0.0);
-                Scalar pair_eng = Scalar(0.0);
-
-                evaluator eval(rsq, rcutsq, *param);
-                if (evaluator::needsCharge())
-                    eval.setCharge(qi, qj);
-
-                eval.evalForceAndEnergy(force_divr, pair_eng, energy_shift);
-
-                // the usual decomposition in hoomd is 1/2 per particle, so if we're computing the change in energy
-                // for a single change, its twice of that.
-                if(type_override != UINT32_MAX)
-                    pair_eng *= Scalar(2.0);
-
-                if (shift_mode == 2)
-                    {
-                    if (rsq >= ronsq && rsq < rcutsq)
-                        {
-                        // Implement XPLOR smoothing
-                        Scalar old_pair_eng = pair_eng;
-                        Scalar old_force_divr = force_divr;
-
-                        // calculate 1.0 / (xplor denominator)
-                        Scalar xplor_denom_inv
-                            = Scalar(1.0)
-                              / ((rcutsq - ronsq) * (rcutsq - ronsq) * (rcutsq - ronsq));
-
-                        Scalar rsq_minus_r_cut_sq = rsq - rcutsq;
-                        Scalar s = rsq_minus_r_cut_sq * rsq_minus_r_cut_sq
-                                   * (rcutsq + Scalar(2.0) * rsq - Scalar(3.0) * ronsq)
-                                   * xplor_denom_inv;
-                        Scalar ds_dr_divr
-                            = Scalar(12.0) * (rsq - ronsq) * rsq_minus_r_cut_sq * xplor_denom_inv;
-
-                        // make modifications to the old pair energy and force
-                        pair_eng = old_pair_eng * s;
-                        force_divr = s * old_force_divr - ds_dr_divr * old_pair_eng;
-                        }
-                    }
-                // calculate the virial
-                if (compute_virial)
-                    {
-                    Scalar force_div2r = Scalar(0.5) * force_divr;
-                    virialxx += dx.x * dx.x * force_div2r;
-                    virialxy += dx.x * dx.y * force_div2r;
-                    virialxz += dx.x * dx.z * force_div2r;
-                    virialyy += dx.y * dx.y * force_div2r;
-                    virialyz += dx.y * dx.z * force_div2r;
-                    virialzz += dx.z * dx.z * force_div2r;
-                    }
-
-                // add up the force vector components
-                force.x += dx.x * force_divr;
-                force.y += dx.y * force_divr;
-                force.z += dx.z * force_divr;
-
-                force.w += pair_eng;
                 }
             }
 
