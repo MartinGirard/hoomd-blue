@@ -141,7 +141,8 @@ template<class evaluator,
          unsigned int shift_mode,
          unsigned int compute_virial,
          int tpp,
-         bool enable_shared_cache>
+         bool enable_shared_cache,
+         class Interaction = DefaultPairInteraction>
 __global__ void
 gpu_compute_pair_forces_shared_kernel(Scalar4* d_force,
                                       Scalar* d_virial,
@@ -235,30 +236,19 @@ gpu_compute_pair_forces_shared_kernel(Scalar4* d_force,
             .d_nlist = d_nlist,
             .d_head_list = d_head_list,
         };
-        PairIterator<tpp> iterator(n, threadIdx.x, idx);
+        PairIterator iterator(n, threadIdx.x, idx, tpp);
 
-        PairFFData<typename evaluator::param_type> force_field{
-            .param = enable_shared_cache ? s_params : d_params,
+        PairParticleData pdata{
+            .d_charge = d_charge,
+            .d_pos = d_pos,
             .rcutsq = enable_shared_cache ? s_rcutsq : d_rcutsq,
             .ron = shift_mode == 2 ? (enable_shared_cache ? s_ronsq : d_ronsq) : 0,
+            .box = box
         };
 
 
-        // loop over neighbors
-        for (auto&& cur_j : iterator)
-            {
-                {
+        force = Interaction(pdata)(iterator, typpair_idx, idx, enable_shared_cache ? s_params : d_params);
 
-
-
-
-
-
-                }
-            }
-
-        // potential energy per particle must be halved
-        force.w *= Scalar(0.5);
         }
 
     // reduce force over threads in cta
