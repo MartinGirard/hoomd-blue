@@ -222,13 +222,7 @@ gpu_compute_pair_forces_shared_kernel(Scalar4* d_force,
 
     // initialize the force to 0
     Scalar4 force = make_scalar4(Scalar(0.0), Scalar(0.0), Scalar(0.0), Scalar(0.0));
-    Scalar virialxx = Scalar(0.0);
-    Scalar virialxy = Scalar(0.0);
-    Scalar virialxz = Scalar(0.0);
-    Scalar virialyy = Scalar(0.0);
-    Scalar virialyz = Scalar(0.0);
-    Scalar virialzz = Scalar(0.0);
-
+    Virial V{};
     if (active)
         {
         NeighborData n{
@@ -249,40 +243,41 @@ gpu_compute_pair_forces_shared_kernel(Scalar4* d_force,
         auto params = enable_shared_cache ? s_params : d_params;
         auto E = FEval.template operator()<evaluator, shift_mode, compute_virial>(iterator, typpair_idx, idx, params, nullptr);
         force = E.first;
-        Virial V = E.second;
+        V = E.second;
         }
 
-    // reduce force over threads in cta
-    hoomd::detail::WarpReduce<Scalar, tpp> reducer;
-    force.x = reducer.Sum(force.x);
-    force.y = reducer.Sum(force.y);
-    force.z = reducer.Sum(force.z);
-    force.w = reducer.Sum(force.w);
+    // either the Interaction type takes care of outputing forces (eg triplet potentials) or we do it here (standard)
+    if(Interaction::reduce_and_write()) {
+        // reduce force over threads in cta
+        hoomd::detail::WarpReduce<Scalar, tpp> reducer;
+        force.x = reducer.Sum(force.x);
+        force.y = reducer.Sum(force.y);
+        force.z = reducer.Sum(force.z);
+        force.w = reducer.Sum(force.w);
 
-    // now that the force calculation is complete, write out the result
-    if (active && threadIdx.x % tpp == 0)
-        d_force[idx] = force;
-
-    if (compute_virial)
-        {
-        virialxx = reducer.Sum(virialxx);
-        virialxy = reducer.Sum(virialxy);
-        virialxz = reducer.Sum(virialxz);
-        virialyy = reducer.Sum(virialyy);
-        virialyz = reducer.Sum(virialyz);
-        virialzz = reducer.Sum(virialzz);
-
-        // if we are the first thread in the cta, write out virial to global mem
+        // now that the force calculation is complete, write out the result
         if (active && threadIdx.x % tpp == 0)
-            {
-            d_virial[0 * virial_pitch + idx] = virialxx;
-            d_virial[1 * virial_pitch + idx] = virialxy;
-            d_virial[2 * virial_pitch + idx] = virialxz;
-            d_virial[3 * virial_pitch + idx] = virialyy;
-            d_virial[4 * virial_pitch + idx] = virialyz;
-            d_virial[5 * virial_pitch + idx] = virialzz;
+            d_force[idx] = force;
+
+        if (compute_virial) {
+            V.xx = reducer.Sum(V.xx);
+            V.xy = reducer.Sum(V.xy);
+            V.xz = reducer.Sum(V.xz);
+            V.yy = reducer.Sum(V.yy);
+            V.yz = reducer.Sum(V.yz);
+            V.zz = reducer.Sum(V.zz);
+
+            // if we are the first thread in the cta, write out virial to global mem
+            if (active && threadIdx.x % tpp == 0) {
+                d_virial[0 * virial_pitch + idx] = V.xx;
+                d_virial[1 * virial_pitch + idx] = V.xy;
+                d_virial[2 * virial_pitch + idx] = V.xz;
+                d_virial[3 * virial_pitch + idx] = V.yy;
+                d_virial[4 * virial_pitch + idx] = V.yz;
+                d_virial[5 * virial_pitch + idx] = V.zz;
             }
         }
+    }
     }
 
 template<typename T> int get_max_block_size(T func)

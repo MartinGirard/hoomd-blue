@@ -48,7 +48,7 @@ namespace hoomd::md {
     };
 
     struct PairIterator {
-        HOSTDEVICE PairIterator(const NeighborData, unsigned tid, unsigned int idx, unsigned _tpp) : tpp(_tpp)  {
+        HOSTDEVICE PairIterator(const NeighborData _data, unsigned tid, unsigned int idx, unsigned _tpp) : tpp(_tpp), data(_data) {
             n_neigh = data.d_n_neigh[idx];
             my_head = data.d_head_list[idx];
             cur_j = tid % tpp < n_neigh ? load(data.d_nlist + my_head + tid % tpp) : 0;
@@ -85,7 +85,7 @@ namespace hoomd::md {
         unsigned n_neigh, cur_j = 0, neigh_idx = 0;
         const unsigned tpp;
         size_t my_head;
-        NeighborData data;
+        const NeighborData data;
     };
 
     struct PairParticleData {
@@ -100,6 +100,39 @@ namespace hoomd::md {
         Scalar xx, yy, zz, xy, xz, yz;
     };
 
+    struct ThirdLaw{
+        ThirdLaw(Scalar4* _force, Scalar* _virial, size_t _pitch, size_t _local) : force(_force), virial(_virial), pitch(_pitch), local(_local){}
+
+        void operator()(const Scalar3& dx,
+                        const Scalar& force_divr,
+                        const Scalar& force_div2r,
+                        const Scalar& pair_eng,
+                        unsigned int j,
+                        bool compute_virial
+        ) const{
+            if(j < local) {
+                unsigned int mem_idx = j;
+                force[mem_idx].x -= dx.x * force_divr;
+                force[mem_idx].y -= dx.y * force_divr;
+                force[mem_idx].z -= dx.z * force_divr;
+                force[mem_idx].w += pair_eng * Scalar(0.5);
+                if (compute_virial) {
+                    virial[0 * pitch + mem_idx] += force_div2r * dx.x * dx.x;
+                    virial[1 * pitch + mem_idx] += force_div2r * dx.x * dx.y;
+                    virial[2 * pitch + mem_idx] += force_div2r * dx.x * dx.z;
+                    virial[3 * pitch + mem_idx] += force_div2r * dx.y * dx.y;
+                    virial[4 * pitch + mem_idx] += force_div2r * dx.y * dx.z;
+                    virial[5 * pitch + mem_idx] += force_div2r * dx.z * dx.z;
+                }
+            }
+        };
+
+        Scalar4* force;
+        Scalar* virial;
+        size_t pitch;
+        size_t local;
+    };
+
     struct BaseInteraction{
         HOSTDEVICE BaseInteraction(PairParticleData pdada) : m_pdata(pdada){}
     protected:
@@ -111,15 +144,20 @@ namespace hoomd::md {
 
         HOSTDEVICE DefaultPairInteraction(PairParticleData pdata) : BaseInteraction(pdata){}
 
-        template<class evaluator, unsigned shift_mode, bool compute_virial>
+        HOSTDEVICE static bool reduce_and_write() {
+            return true;
+        }
+
+        template<class evaluator, unsigned shift_mode, bool compute_virial, bool third_law = false>
         auto HOSTDEVICE operator()(PairIterator &it, // iterator over neighbors
                            Index2D& typpair_idx, // Index2D to access pair values
                            unsigned idx, // particle index we are computing
                            const typename evaluator::param_type* forcefield, // force-field parameters
-                           void* extra) // required extra stuff
+                           void* extra,// required extra stuff
+                           ThirdLaw* TL = nullptr) // set the hook to nullptr to avoid usage unless specified
                            {
             Scalar4 force = {0., 0., 0., 0.};
-            Virial v;
+            Virial v{};
             // read in the position of our particle.
             Scalar4 postypei = load(m_pdata.d_pos + idx);
             Scalar3 posi = make_scalar3(postypei.x, postypei.y, postypei.z);
@@ -218,12 +256,63 @@ namespace hoomd::md {
                 force.z += dx.z * force_divr;
 
                 force.w += pair_eng;
+
+                // enclose the 3rd law use on CPU within a template check so it doesnt get compiled at all on gpu
+                if constexpr (third_law){
+                    auto third_law_compute = *((ThirdLaw*)TL);
+                    third_law_compute(dx, force_divr, Scalar(0.5) * force_divr, pair_eng, cur_j, compute_virial);
+                }
+
             }
             // potential energy per particle must be halved
             force.w *= Scalar(0.5);
             return std::make_pair(force, v);
         }
-
     };
+
+    template<class Interaction, class evaluator, unsigned shift_mode, bool compute_virial, bool third_law>
+    struct InteractionDispatchHelper{
+        template<class... Args>
+                auto Call(Interaction& I, Args... args){
+                    return I.template operator()<evaluator, shift_mode, compute_virial, third_law>(args...);
+                }
+    };
+
+
+
+    template<class Interaction, class evaluator, unsigned shift_mode, bool third_law, class... Args>
+    auto resolveVirial(Interaction& i, bool has_virial, Args... args){
+        if (has_virial) {
+            auto I = InteractionDispatchHelper<Interaction, evaluator, shift_mode, true, third_law>{};
+            return I.Call(i, args...);
+        }
+        else {
+            auto I = InteractionDispatchHelper<Interaction, evaluator, shift_mode, false, third_law>{};
+            return I.Call(i, args...);
+        }
+    }
+
+    template<class Interaction, class evaluator, bool third_law, class... Args>
+    auto resolveShift(Interaction& i, unsigned shift, bool has_virial, Args... args){
+        switch (shift) {
+            case 0:
+                return resolveVirial<Interaction, evaluator, 0, third_law>(i, has_virial, args...);
+            case 1:
+                return resolveVirial<Interaction, evaluator, 1, third_law>(i, has_virial, args...);
+            case 2:
+                return resolveVirial<Interaction, evaluator, 2, third_law>(i, has_virial, args...);
+            default:
+                throw std::runtime_error("Bad shift value");
+        }
+    }
+
+    template<class Interaction, class evaluator, class... Args>
+    auto dispatch(Interaction& i, unsigned shift, bool has_virial, bool third_law, Args... args){
+        if(third_law)
+            return resolveShift<Interaction, evaluator, true>(i, shift, has_virial, args...);
+        else
+            return resolveShift<Interaction, evaluator, false>(i, shift, has_virial, args...);
+    }
+
 }
 #endif // HOOMD_GPUPAIRITERATOR_CUH

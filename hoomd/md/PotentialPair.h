@@ -24,6 +24,8 @@
 
 #ifdef ENABLE_MPI
 #include "hoomd/Communicator.h"
+#include "GPUPairIterator.cuh"
+
 #endif
 
 /*! \file PotentialPair.h
@@ -81,7 +83,7 @@ namespace md
    parameters is defined by \a param_type in the potential evaluator class passed in. See the
    appropriate documentation for the evaluator for the definition of each element of the parameters.
 */
-template<class evaluator> class PotentialPair : public ForceCompute
+template<class evaluator, class Interaction = DefaultPairInteraction> class PYBIND11_EXPORT PotentialPair : public ForceCompute
     {
     public:
     //! Param type from evaluator
@@ -345,8 +347,8 @@ template<class evaluator> class PotentialPair : public ForceCompute
 /*! \param sysdef System to compute forces on
     \param nlist Neighborlist to use for computing the forces
 */
-template<class evaluator>
-PotentialPair<evaluator>::PotentialPair(std::shared_ptr<SystemDefinition> sysdef,
+template<class evaluator, class Interaction>
+PotentialPair<evaluator, Interaction>::PotentialPair(std::shared_ptr<SystemDefinition> sysdef,
                                         std::shared_ptr<NeighborList> nlist)
     : ForceCompute(sysdef), m_nlist(nlist), m_shift_mode(no_shift),
       m_typpair_idx(m_pdata->getNTypes())
@@ -446,7 +448,7 @@ PotentialPair<evaluator>::PotentialPair(std::shared_ptr<SystemDefinition> sysdef
 #endif
     }
 
-template<class evaluator> PotentialPair<evaluator>::~PotentialPair()
+template<class evaluator, class Interaction> PotentialPair<evaluator, Interaction>::~PotentialPair()
     {
     m_exec_conf->msg->notice(5) << "Destroying PotentialPair<" << evaluator::getName() << ">"
                                 << std::endl;
@@ -463,8 +465,8 @@ template<class evaluator> PotentialPair<evaluator>::~PotentialPair()
     \note When setting the value for (\a typ1, \a typ2), the parameter for (\a typ2, \a typ1) is
    automatically set.
 */
-template<class evaluator>
-void PotentialPair<evaluator>::setParams(unsigned int typ1,
+template<class evaluator, class Interaction>
+void PotentialPair<evaluator, Interaction>::setParams(unsigned int typ1,
                                          unsigned int typ2,
                                          const param_type& param)
     {
@@ -473,15 +475,15 @@ void PotentialPair<evaluator>::setParams(unsigned int typ1,
     m_params[m_typpair_idx(typ2, typ1)] = param;
     }
 
-template<class evaluator>
-void PotentialPair<evaluator>::setParamsPython(pybind11::tuple typ, pybind11::dict params)
+template<class evaluator, class Interaction>
+void PotentialPair<evaluator, Interaction>::setParamsPython(pybind11::tuple typ, pybind11::dict params)
     {
     auto typ1 = m_pdata->getTypeByName(typ[0].cast<std::string>());
     auto typ2 = m_pdata->getTypeByName(typ[1].cast<std::string>());
     setParams(typ1, typ2, param_type(params, m_exec_conf->isCUDAEnabled()));
     }
 
-template<class evaluator> pybind11::dict PotentialPair<evaluator>::getParams(pybind11::tuple typ)
+template<class evaluator, class Interaction> pybind11::dict PotentialPair<evaluator, Interaction>::getParams(pybind11::tuple typ)
     {
     auto typ1 = m_pdata->getTypeByName(typ[0].cast<std::string>());
     auto typ2 = m_pdata->getTypeByName(typ[1].cast<std::string>());
@@ -490,8 +492,8 @@ template<class evaluator> pybind11::dict PotentialPair<evaluator>::getParams(pyb
     return m_params[m_typpair_idx(typ1, typ2)].asDict();
     }
 
-template<class evaluator>
-void PotentialPair<evaluator>::validateTypes(unsigned int typ1,
+template<class evaluator, class Interaction>
+void PotentialPair<evaluator, Interaction>::validateTypes(unsigned int typ1,
                                              unsigned int typ2,
                                              std::string action)
     {
@@ -508,8 +510,8 @@ void PotentialPair<evaluator>::validateTypes(unsigned int typ1,
     \note When setting the value for (\a typ1, \a typ2), the parameter for (\a typ2, \a typ1) is
    automatically set.
 */
-template<class evaluator>
-void PotentialPair<evaluator>::setRcut(unsigned int typ1, unsigned int typ2, Scalar rcut)
+template<class evaluator, class Interaction>
+void PotentialPair<evaluator, Interaction>::setRcut(unsigned int typ1, unsigned int typ2, Scalar rcut)
     {
     validateTypes(typ1, typ2, "setting r_cut");
         {
@@ -530,15 +532,15 @@ void PotentialPair<evaluator>::setRcut(unsigned int typ1, unsigned int typ2, Sca
     m_nlist->notifyRCutMatrixChange();
     }
 
-template<class evaluator>
-void PotentialPair<evaluator>::setRCutPython(pybind11::tuple types, Scalar r_cut)
+template<class evaluator, class Interaction>
+void PotentialPair<evaluator, Interaction>::setRCutPython(pybind11::tuple types, Scalar r_cut)
     {
     auto typ1 = m_pdata->getTypeByName(types[0].cast<std::string>());
     auto typ2 = m_pdata->getTypeByName(types[1].cast<std::string>());
     setRcut(typ1, typ2, r_cut);
     }
 
-template<class evaluator> Scalar PotentialPair<evaluator>::getRCut(pybind11::tuple types)
+template<class evaluator, class Interaction> Scalar PotentialPair<evaluator, Interaction>::getRCut(pybind11::tuple types)
     {
     auto typ1 = m_pdata->getTypeByName(types[0].cast<std::string>());
     auto typ2 = m_pdata->getTypeByName(types[1].cast<std::string>());
@@ -553,8 +555,8 @@ template<class evaluator> Scalar PotentialPair<evaluator>::getRCut(pybind11::tup
     \note When setting the value for (\a typ1, \a typ2), the parameter for (\a typ2, \a typ1) is
    automatically set.
 */
-template<class evaluator>
-void PotentialPair<evaluator>::setRon(unsigned int typ1, unsigned int typ2, Scalar ron)
+template<class evaluator, class Interaction>
+void PotentialPair<evaluator, Interaction>::setRon(unsigned int typ1, unsigned int typ2, Scalar ron)
     {
     validateTypes(typ1, typ2, "setting r_on");
     ArrayHandle<Scalar> h_ronsq(m_ronsq, access_location::host, access_mode::readwrite);
@@ -562,7 +564,7 @@ void PotentialPair<evaluator>::setRon(unsigned int typ1, unsigned int typ2, Scal
     h_ronsq.data[m_typpair_idx(typ2, typ1)] = ron * ron;
     }
 
-template<class evaluator> Scalar PotentialPair<evaluator>::getROn(pybind11::tuple types)
+template<class evaluator, class Interaction> Scalar PotentialPair<evaluator, Interaction>::getROn(pybind11::tuple types)
     {
     auto typ1 = m_pdata->getTypeByName(types[0].cast<std::string>());
     auto typ2 = m_pdata->getTypeByName(types[1].cast<std::string>());
@@ -571,8 +573,8 @@ template<class evaluator> Scalar PotentialPair<evaluator>::getROn(pybind11::tupl
     return sqrt(h_ronsq.data[m_typpair_idx(typ1, typ2)]);
     }
 
-template<class evaluator>
-void PotentialPair<evaluator>::setROnPython(pybind11::tuple types, Scalar r_on)
+template<class evaluator, class Interaction>
+void PotentialPair<evaluator, Interaction>::setROnPython(pybind11::tuple types, Scalar r_on)
     {
     auto typ1 = m_pdata->getTypeByName(types[0].cast<std::string>());
     auto typ2 = m_pdata->getTypeByName(types[1].cast<std::string>());
@@ -584,7 +586,7 @@ void PotentialPair<evaluator>::setROnPython(pybind11::tuple types, Scalar r_on)
 
     \param timestep specifies the current time step of the simulation
 */
-template<class evaluator> void PotentialPair<evaluator>::computeForces(uint64_t timestep)
+template<class evaluator, class Interaction> void PotentialPair<evaluator, Interaction>::computeForces(uint64_t timestep)
     {
     // start by updating the neighborlist
     m_nlist->compute(timestep);
@@ -623,177 +625,55 @@ template<class evaluator> void PotentialPair<evaluator>::computeForces(uint64_t 
     memset((void*)h_force.data, 0, sizeof(Scalar4) * m_force.getNumElements());
     memset((void*)h_virial.data, 0, sizeof(Scalar) * m_virial.getNumElements());
 
+    const NeighborData ndata{
+            .d_n_neigh = h_n_neigh.data,
+            .d_nlist = h_nlist.data,
+            .d_head_list = h_head_list.data,
+    };
+    const PairParticleData pdata{
+        .d_pos = h_pos.data,
+        .d_charge = h_charge.data,
+        .box = box,
+        .rcutsq = h_rcutsq.data,
+        .ron = h_ronsq.data,
+    };
+
     // for each particle
-    for (int i = 0; i < (int)m_pdata->getN(); i++)
-        {
-        // access the particle's position and type (MEM TRANSFER: 4 scalars)
-        Scalar3 pi = make_scalar3(h_pos.data[i].x, h_pos.data[i].y, h_pos.data[i].z);
-        unsigned int typei = __scalar_as_int(h_pos.data[i].w);
+    for (int i = 0; i < (int)m_pdata->getN(); i++) {
 
-        // sanity check
-        assert(typei < m_pdata->getNTypes());
+        PairIterator iterator(ndata, 0, i, 0);
 
-        // access charge (if needed)
-        Scalar qi = Scalar(0.0);
-        if (evaluator::needsCharge())
-            qi = h_charge.data[i];
+        auto FEval = Interaction(pdata);
+        std::pair<Scalar4, Virial> E;
 
-        // initialize current particle force, potential energy, and virial to 0
-        Scalar3 fi = make_scalar3(0, 0, 0);
-        Scalar pei = 0.0;
-        Scalar virialxxi = 0.0;
-        Scalar virialxyi = 0.0;
-        Scalar virialxzi = 0.0;
-        Scalar virialyyi = 0.0;
-        Scalar virialyzi = 0.0;
-        Scalar virialzzi = 0.0;
-
-        // loop over all of the neighbors of this particle
-        const size_t myHead = h_head_list.data[i];
-        const unsigned int size = (unsigned int)h_n_neigh.data[i];
-        for (unsigned int k = 0; k < size; k++)
-            {
-            // access the index of this neighbor (MEM TRANSFER: 1 scalar)
-            unsigned int j = h_nlist.data[myHead + k];
-            assert(j < m_pdata->getN() + m_pdata->getNGhosts());
-
-            // calculate dr_ji (MEM TRANSFER: 3 scalars / FLOPS: 3)
-            Scalar3 pj = make_scalar3(h_pos.data[j].x, h_pos.data[j].y, h_pos.data[j].z);
-            Scalar3 dx = pi - pj;
-
-            // access the type of the neighbor particle (MEM TRANSFER: 1 scalar)
-            unsigned int typej = __scalar_as_int(h_pos.data[j].w);
-            assert(typej < m_pdata->getNTypes());
-
-            // access charge (if needed)
-            Scalar qj = Scalar(0.0);
-            if (evaluator::needsCharge())
-                qj = h_charge.data[j];
-
-            // apply periodic boundary conditions
-            dx = box.minImage(dx);
-
-            // calculate r_ij squared (FLOPS: 5)
-            Scalar rsq = dot(dx, dx);
-
-            // get parameters for this type pair
-            unsigned int typpair_idx = m_typpair_idx(typei, typej);
-            const param_type& param = m_params[typpair_idx];
-            Scalar rcutsq = h_rcutsq.data[typpair_idx];
-            Scalar ronsq = Scalar(0.0);
-            if (m_shift_mode == xplor)
-                ronsq = h_ronsq.data[typpair_idx];
-
-            // design specifies that energies are shifted if
-            // 1) shift mode is set to shift
-            // or 2) shift mode is explor and ron > rcut
-            bool energy_shift = false;
-            if (m_shift_mode == shift)
-                energy_shift = true;
-            else if (m_shift_mode == xplor)
-                {
-                if (ronsq > rcutsq)
-                    energy_shift = true;
-                }
-
-            // compute the force and potential energy
-            Scalar force_divr = Scalar(0.0);
-            Scalar pair_eng = Scalar(0.0);
-            evaluator eval(rsq, rcutsq, param);
-            if (evaluator::needsCharge())
-                eval.setCharge(qi, qj);
-
-            bool evaluated = eval.evalForceAndEnergy(force_divr, pair_eng, energy_shift);
-
-            if (evaluated)
-                {
-                // the usual decomposition in hoomd is 1/2 per particle, so if we're computing the change in energy
-                // for a single change, its twice of that.
-                if(m_type_override != UINT32_MAX)
-                    pair_eng *= Scalar(2.0);
-
-                // modify the potential for xplor shifting
-                if (m_shift_mode == xplor)
-                    {
-                    if (rsq >= ronsq && rsq < rcutsq)
-                        {
-                        // Implement XPLOR smoothing (FLOPS: 16)
-                        Scalar old_pair_eng = pair_eng;
-                        Scalar old_force_divr = force_divr;
-
-                        // calculate 1.0 / (xplor denominator)
-                        Scalar xplor_denom_inv
-                            = Scalar(1.0)
-                              / ((rcutsq - ronsq) * (rcutsq - ronsq) * (rcutsq - ronsq));
-
-                        Scalar rsq_minus_r_cut_sq = rsq - rcutsq;
-                        Scalar s = rsq_minus_r_cut_sq * rsq_minus_r_cut_sq
-                                   * (rcutsq + Scalar(2.0) * rsq - Scalar(3.0) * ronsq)
-                                   * xplor_denom_inv;
-                        Scalar ds_dr_divr
-                            = Scalar(12.0) * (rsq - ronsq) * rsq_minus_r_cut_sq * xplor_denom_inv;
-
-                        // make modifications to the old pair energy and force
-                        pair_eng = old_pair_eng * s;
-                        // note: I'm not sure why the minus sign needs to be there: my notes have a
-                        // + But this is verified correct via plotting
-                        force_divr = s * old_force_divr - ds_dr_divr * old_pair_eng;
-                        }
-                    }
-
-                Scalar force_div2r = force_divr * Scalar(0.5);
-                // add the force, potential energy and virial to the particle i
-                // (FLOPS: 8)
-                fi += dx * force_divr;
-                pei += pair_eng * Scalar(0.5);
-                if (compute_virial)
-                    {
-                    virialxxi += force_div2r * dx.x * dx.x;
-                    virialxyi += force_div2r * dx.x * dx.y;
-                    virialxzi += force_div2r * dx.x * dx.z;
-                    virialyyi += force_div2r * dx.y * dx.y;
-                    virialyzi += force_div2r * dx.y * dx.z;
-                    virialzzi += force_div2r * dx.z * dx.z;
-                    }
-
-                // add the force to particle j if we are using the third law (MEM TRANSFER: 10
-                // scalars / FLOPS: 8) only add force to local particles
-                if (third_law && j < m_pdata->getN())
-                    {
-                    unsigned int mem_idx = j;
-                    h_force.data[mem_idx].x -= dx.x * force_divr;
-                    h_force.data[mem_idx].y -= dx.y * force_divr;
-                    h_force.data[mem_idx].z -= dx.z * force_divr;
-                    h_force.data[mem_idx].w += pair_eng * Scalar(0.5);
-                    if (compute_virial)
-                        {
-                        h_virial.data[0 * m_virial_pitch + mem_idx] += force_div2r * dx.x * dx.x;
-                        h_virial.data[1 * m_virial_pitch + mem_idx] += force_div2r * dx.x * dx.y;
-                        h_virial.data[2 * m_virial_pitch + mem_idx] += force_div2r * dx.x * dx.z;
-                        h_virial.data[3 * m_virial_pitch + mem_idx] += force_div2r * dx.y * dx.y;
-                        h_virial.data[4 * m_virial_pitch + mem_idx] += force_div2r * dx.y * dx.z;
-                        h_virial.data[5 * m_virial_pitch + mem_idx] += force_div2r * dx.z * dx.z;
-                        }
-                    }
-                }
-            }
+        if(third_law) {
+            ThirdLaw TL(h_force.data, h_virial.data, m_virial_pitch, m_pdata->getN());
+            E = dispatch<Interaction, evaluator>(FEval, m_shift_mode, compute_virial, third_law, iterator, m_typpair_idx, i, m_params.data(), nullptr, &TL);
+        } else{
+            E = dispatch<Interaction, evaluator>(FEval, m_shift_mode, compute_virial, third_law, iterator, m_typpair_idx, i, m_params.data(), nullptr,
+                                                 nullptr);
+        }
 
         // finally, increment the force, potential energy and virial for particle i
-        unsigned int mem_idx = i;
-        h_force.data[mem_idx].x += fi.x;
-        h_force.data[mem_idx].y += fi.y;
-        h_force.data[mem_idx].z += fi.z;
-        h_force.data[mem_idx].w += pei;
-        if (compute_virial)
-            {
-            h_virial.data[0 * m_virial_pitch + mem_idx] += virialxxi;
-            h_virial.data[1 * m_virial_pitch + mem_idx] += virialxyi;
-            h_virial.data[2 * m_virial_pitch + mem_idx] += virialxzi;
-            h_virial.data[3 * m_virial_pitch + mem_idx] += virialyyi;
-            h_virial.data[4 * m_virial_pitch + mem_idx] += virialyzi;
-            h_virial.data[5 * m_virial_pitch + mem_idx] += virialzzi;
+        auto F = E.first;
+        auto V = E.second;
+
+        if (Interaction::reduce_and_write) { // only write if its not internally handled by the Interaction
+            unsigned int mem_idx = i;
+            h_force.data[mem_idx].x += F.x;
+            h_force.data[mem_idx].y += F.y;
+            h_force.data[mem_idx].z += F.z;
+            h_force.data[mem_idx].w += F.w;
+            if (compute_virial) {
+                h_virial.data[0 * m_virial_pitch + mem_idx] += V.xx;
+                h_virial.data[1 * m_virial_pitch + mem_idx] += V.xy;
+                h_virial.data[2 * m_virial_pitch + mem_idx] += V.xz;
+                h_virial.data[3 * m_virial_pitch + mem_idx] += V.yy;
+                h_virial.data[4 * m_virial_pitch + mem_idx] += V.yz;
+                h_virial.data[5 * m_virial_pitch + mem_idx] += V.zz;
             }
         }
+    }
 
     computeTailCorrection();
     }
@@ -801,8 +681,8 @@ template<class evaluator> void PotentialPair<evaluator>::computeForces(uint64_t 
 #ifdef ENABLE_MPI
 /*! \param timestep Current time step
  */
-template<class evaluator>
-CommFlags PotentialPair<evaluator>::getRequestedCommFlags(uint64_t timestep)
+template<class evaluator, class Interaction>
+CommFlags PotentialPair<evaluator, Interaction>::getRequestedCommFlags(uint64_t timestep)
     {
     CommFlags flags = CommFlags(0);
 
@@ -815,7 +695,7 @@ CommFlags PotentialPair<evaluator>::getRequestedCommFlags(uint64_t timestep)
     }
 #endif
 
-template<class evaluator> void PotentialPair<evaluator>::startAutotuning()
+template<class evaluator, class Interaction> void PotentialPair<evaluator, Interaction>::startAutotuning()
     {
     ForceCompute::startAutotuning();
 
@@ -823,7 +703,7 @@ template<class evaluator> void PotentialPair<evaluator>::startAutotuning()
     m_nlist->startAutotuning();
     }
 
-template<class evaluator> bool PotentialPair<evaluator>::isAutotuningComplete()
+template<class evaluator, class Interaction> bool PotentialPair<evaluator, Interaction>::isAutotuningComplete()
     {
     bool result = ForceCompute::isAutotuningComplete();
     return result && m_nlist->isAutotuningComplete();
@@ -833,9 +713,9 @@ template<class evaluator> bool PotentialPair<evaluator>::isAutotuningComplete()
 //! strictly speaking tags1 and tags2 should be disjoint for the result to make any sense.
 //! \param energy is the sum of the energies between all particles in tags1 and tags2, U = \sum_{i
 //! \in tags1, j \in tags2} u_{ij}.
-template<class evaluator>
+template<class evaluator, class Interaction>
 template<class InputIterator>
-inline void PotentialPair<evaluator>::computeEnergyBetweenSets(InputIterator first1,
+inline void PotentialPair<evaluator, Interaction>::computeEnergyBetweenSets(InputIterator first1,
                                                                InputIterator last1,
                                                                InputIterator first2,
                                                                InputIterator last2,
@@ -996,8 +876,8 @@ inline void PotentialPair<evaluator>::computeEnergyBetweenSets(InputIterator fir
     }
 
 //! Calculates the energy between two lists of particles.
-template<class evaluator>
-Scalar PotentialPair<evaluator>::computeEnergyBetweenSetsPythonList(
+template<class evaluator, class Interaction>
+Scalar PotentialPair<evaluator, Interaction>::computeEnergyBetweenSetsPythonList(
     pybind11::array_t<int, pybind11::array::c_style> tags1,
     pybind11::array_t<int, pybind11::array::c_style> tags2)
     {
