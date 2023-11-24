@@ -225,29 +225,34 @@ gpu_compute_pair_forces_shared_kernel(Scalar4* d_force,
     Virial V{};
     if (active)
         {
-        NeighborData n{
-            .d_n_neigh  = d_n_neigh,
-            .d_nlist = d_nlist,
-            .d_head_list = d_head_list,
-        };
-        PairIterator iterator(n, threadIdx.x, idx, tpp);
 
-        PairParticleData pdata{
+        iParticleData idata{
+            .postype = load(d_pos + idx),
+            .qi = evaluator::needsCharge() ? load(d_charge + idx) : Scalar(0)
+        };
+
+        NeighborData n{
+            .n_neigh  = d_n_neigh[idx],
+            .d_nlist = d_nlist,
+            .my_head = d_head_list[idx],
             .d_pos = d_pos,
             .d_charge = d_charge,
+        };
+        PairIterator iterator(n, threadIdx.x, tpp);
+
+        PairParticleData pdata{
             .box = box,
             .rcutsq = enable_shared_cache ? s_rcutsq : d_rcutsq,
             .ron = shift_mode == 2 ? (enable_shared_cache ? s_ronsq : d_ronsq) : 0
         };
-        auto FEval = Interaction(pdata);
-        auto params = enable_shared_cache ? s_params : d_params;
-        auto E = FEval.template operator()<evaluator, shift_mode, compute_virial>(iterator, typpair_idx, idx, params, nullptr);
-        force = E.first;
-        V = E.second;
+        auto FEval = Interaction(pdata, force, V);
+        const auto params = enable_shared_cache ? s_params : d_params;
+        FEval.template operator()<evaluator, shift_mode, compute_virial>(iterator, typpair_idx, idata, params, nullptr);
+        //force = E.first;
+        //V = E.second;
         }
-
     // either the Interaction type takes care of outputing forces (eg triplet potentials) or we do it here (standard)
-    if(Interaction::reduce_and_write()) {
+    if constexpr (Interaction::reduce_and_write()) {
         // reduce force over threads in cta
         hoomd::detail::WarpReduce<Scalar, tpp> reducer;
         force.x = reducer.Sum(force.x);

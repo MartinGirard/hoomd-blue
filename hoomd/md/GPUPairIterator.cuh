@@ -28,12 +28,20 @@
 
 #ifndef HOSTDEVICE
 #define HOSTDEVICE __host__ __device__
+#else
+#define HOSTDEVICE
+#endif
+
+#ifdef __HIPCC__
+#define INLINE __forceinline__
+#else
+#define INLINE inline
 #endif
 
 namespace hoomd::md {
 
     template<typename T>
-    T HOSTDEVICE load(T* a){
+    T HOSTDEVICE inline load(T* a){
 #ifdef __HIPCC__
         return __ldg(a);
 #else
@@ -42,58 +50,55 @@ namespace hoomd::md {
     };
 
     struct NeighborData {
-        const unsigned int *d_n_neigh;
-        const unsigned int *d_nlist;
-        const size_t *d_head_list;
+        const unsigned int n_neigh;
+        const unsigned int* d_nlist;
+        const size_t my_head;
+        const Scalar4 *d_pos;
+        const Scalar *d_charge;
     };
 
     struct PairIterator {
-        HOSTDEVICE PairIterator(const NeighborData _data, unsigned tid, unsigned int idx, unsigned _tpp) : tpp(_tpp), data(_data) {
-            n_neigh = data.d_n_neigh[idx];
-            my_head = data.d_head_list[idx];
-            cur_j = tid % tpp < n_neigh ? load(data.d_nlist + my_head + tid % tpp) : 0;
-        }
-
-        HOSTDEVICE PairIterator operator++() {
-            if (neigh_idx + tpp < n_neigh) {
-                cur_j = load(data.d_nlist + my_head + neigh_idx + tpp);
+        HOSTDEVICE PairIterator(const NeighborData _data, unsigned tid, unsigned _tpp) :
+        data(_data), tpp(_tpp) {
+            if(tid % tpp < data.n_neigh) {
+                cur_j = load(data.d_nlist + data.my_head + tid % tpp);
             }
-            neigh_idx++;
+            neigh_idx = tid % tpp;
+            valid = neigh_idx < data.n_neigh;
+        }
+
+        HOSTDEVICE INLINE PairIterator& operator++() {
+            if (neigh_idx + tpp < data.n_neigh) {
+                cur_j = load(data.d_nlist + data.my_head + neigh_idx + tpp);
+            }
+            neigh_idx += tpp;
+            valid = neigh_idx < data.n_neigh;
             return *this;
-        }
-
-        HOSTDEVICE PairIterator operator++(int) {
-            PairIterator r = *this;
-            this->operator++();
-            return r;
-        }
-
-        HOSTDEVICE unsigned int &operator->() {
-            return cur_j;
         }
 
         HOSTDEVICE unsigned int operator*() const {
             return cur_j;
         }
 
-        HOSTDEVICE bool valid() const{
-            return neigh_idx < n_neigh;
-        }
+        HOSTDEVICE auto position() const{return load(data.d_pos + cur_j);};
+        HOSTDEVICE Scalar charge() const{return load(data.d_charge + cur_j);};
 
+        unsigned cur_j = 0, neigh_idx = 0;
 
-    protected:
-        unsigned n_neigh, cur_j = 0, neigh_idx = 0;
-        const unsigned tpp;
-        size_t my_head;
         const NeighborData data;
+        const unsigned tpp;
+        bool valid;
     };
 
     struct PairParticleData {
-        const Scalar4 *d_pos;
-        const Scalar *d_charge;
         const BoxDim box;
         const Scalar *rcutsq;
         const Scalar *ron;
+    };
+
+    struct iParticleData{
+        const Scalar4 postype;
+        const Scalar qi;
     };
 
     struct Virial{
@@ -136,138 +141,145 @@ namespace hoomd::md {
     struct BaseInteraction{
         HOSTDEVICE BaseInteraction(PairParticleData pdada) : m_pdata(pdada){}
     protected:
-        PairParticleData m_pdata;
+        const PairParticleData m_pdata;
     };
 
 
     struct DefaultPairInteraction : public BaseInteraction{
 
-        HOSTDEVICE DefaultPairInteraction(PairParticleData pdata) : BaseInteraction(pdata){}
+        HOSTDEVICE DefaultPairInteraction(PairParticleData pdata, Scalar4& f, Virial& _v) : BaseInteraction(pdata), force(f), v(_v){}
 
-        HOSTDEVICE static bool reduce_and_write() {
+        HOSTDEVICE constexpr static bool reduce_and_write() {
             return true;
         }
 
         template<class evaluator, unsigned shift_mode, bool compute_virial, bool third_law = false>
-        auto HOSTDEVICE operator()(PairIterator &it, // iterator over neighbors
-                           Index2D& typpair_idx, // Index2D to access pair values
-                           unsigned idx, // particle index we are computing
+        auto HOSTDEVICE INLINE operator()(PairIterator &it, // iterator over neighbors
+                           const Index2D& typpair_idx, // Index2D to access pair values
+                           const iParticleData& idata, // particle index we are computing
                            const typename evaluator::param_type* forcefield, // force-field parameters
-                           void* extra,// required extra stuff
-                           ThirdLaw* TL = nullptr) // set the hook to nullptr to avoid usage unless specified
+                           const void* extra,// required extra stuff
+                           const ThirdLaw* TL = nullptr
+                           ) // set the hook to nullptr to avoid usage unless specified
                            {
-            Scalar4 force = {0., 0., 0., 0.};
-            Virial v{};
+            //Scalar4 force = {0., 0., 0., 0.};
+            //Virial v{};
             // read in the position of our particle.
-            Scalar4 postypei = load(m_pdata.d_pos + idx);
+            Scalar4 postypei = idata.postype;
             Scalar3 posi = make_scalar3(postypei.x, postypei.y, postypei.z);
 
-            Scalar qi = Scalar(0);
-            if (evaluator::needsCharge())
-                qi = load(m_pdata.d_charge + idx);
+            while (it.valid) {
+                {
+                    auto cur_j = *it;
+                    Scalar4 postypej = it.position();
+                    Scalar qj = evaluator::needsCharge()? it.charge() : Scalar(0.0); // there's no load if charge is not needed
+                    ++it;
 
-            for (; it.valid(); it++) {
-                auto cur_j = *it;
-                // get the neighbor's position
-                Scalar4 postypej = load(m_pdata.d_pos + cur_j);
-                Scalar3 posj = make_scalar3(postypej.x, postypej.y, postypej.z);
+                    // get the neighbor's position
+                    Scalar3 posj = make_scalar3(postypej.x, postypej.y,
+                                                postypej.z);
 
-                Scalar qj = Scalar(0.0);
-                if (evaluator::needsCharge())
-                    qj = load(m_pdata.d_charge + cur_j);
+                    // calculate dr (with periodic boundary conditions)
+                    Scalar3 dx = posi - posj;
 
-                // calculate dr (with periodic boundary conditions)
-                Scalar3 dx = posi - posj;
+                    // apply periodic boundary conditions
+                    dx = m_pdata.box.minImage(dx);
 
-                // apply periodic boundary conditions
-                dx = m_pdata.box.minImage(dx);
+                    // calculate r squared
+                    Scalar rsq = dot(dx, dx);
 
-                // calculate r squared
-                Scalar rsq = dot(dx, dx);
+                    // access the per type pair parameters
+                    unsigned int typpair = typpair_idx(
+                            __scalar_as_int(postypei.w),
+                            __scalar_as_int(postypej.w));
 
-                // access the per type pair parameters
-                unsigned int typpair = typpair_idx(__scalar_as_int(postypei.w),
-                                                   __scalar_as_int(postypej.w));
-
-                Scalar ronsq = *(m_pdata.ron+typpair);
-                Scalar rcutsq = *(m_pdata.rcutsq + typpair);
-                // design specifies that energies are shifted if
-                // 1) shift mode is set to shift
-                // or 2) shift mode is explor and ron > rcut
-                bool energy_shift = false;
-                if (shift_mode == 1)
-                    energy_shift = true;
-                else if (shift_mode == 2) {
-                    if (ronsq > rcutsq)
+                    Scalar ronsq =
+                            shift_mode == 2 ? *(m_pdata.ron + typpair) : Scalar(
+                                    0.0);
+                    Scalar rcutsq = *(m_pdata.rcutsq + typpair);
+                    // design specifies that energies are shifted if
+                    // 1) shift mode is set to shift
+                    // or 2) shift mode is explor and ron > rcut
+                    bool energy_shift = false;
+                    if  (shift_mode == 1)
                         energy_shift = true;
-                }
+                    else if  (shift_mode == 2) {
+                        if (ronsq > rcutsq)
+                            energy_shift = true;
+                    }
 
-                // evaluate the potential
-                Scalar force_divr = Scalar(0.0);
-                Scalar pair_eng = Scalar(0.0);
+                    // evaluate the potential
+                    Scalar force_divr = Scalar(0.0);
+                    Scalar pair_eng = Scalar(0.0);
 
-                evaluator eval(rsq, rcutsq, *(forcefield + typpair));
-                if (evaluator::needsCharge())
-                    eval.setCharge(qi, qj);
+                    evaluator eval(rsq, rcutsq, *(forcefield + typpair));
+                    if constexpr (evaluator::needsCharge())
+                        eval.setCharge(idata.qi, qj);
 
-                eval.evalForceAndEnergy(force_divr, pair_eng, energy_shift);
+                    eval.evalForceAndEnergy(force_divr, pair_eng, energy_shift);
 
-                if (shift_mode == 2) {
-                    if (rsq >= ronsq && rsq < rcutsq) {
-                        // Implement XPLOR smoothing
-                        Scalar old_pair_eng = pair_eng;
-                        Scalar old_force_divr = force_divr;
+                    if (shift_mode == 2) {
+                        if (rsq >= ronsq && rsq < rcutsq) {
+                            // Implement XPLOR smoothing
+                            Scalar old_pair_eng = pair_eng;
+                            Scalar old_force_divr = force_divr;
 
-                        // calculate 1.0 / (xplor denominator)
-                        Scalar xplor_denom_inv
-                                = Scalar(1.0)
-                                  / ((rcutsq - ronsq) * (rcutsq - ronsq) *
-                                     (rcutsq - ronsq));
+                            // calculate 1.0 / (xplor denominator)
+                            Scalar xplor_denom_inv
+                                    = Scalar(1.0)
+                                      / ((rcutsq - ronsq) * (rcutsq - ronsq) *
+                                         (rcutsq - ronsq));
 
-                        Scalar rsq_minus_r_cut_sq = rsq - rcutsq;
-                        Scalar s = rsq_minus_r_cut_sq * rsq_minus_r_cut_sq
-                                   * (rcutsq + Scalar(2.0) * rsq -
-                                      Scalar(3.0) * ronsq)
-                                   * xplor_denom_inv;
-                        Scalar ds_dr_divr
-                                = Scalar(12.0) * (rsq - ronsq) *
-                                  rsq_minus_r_cut_sq * xplor_denom_inv;
+                            Scalar rsq_minus_r_cut_sq = rsq - rcutsq;
+                            Scalar s = rsq_minus_r_cut_sq * rsq_minus_r_cut_sq
+                                       * (rcutsq + Scalar(2.0) * rsq -
+                                          Scalar(3.0) * ronsq)
+                                       * xplor_denom_inv;
+                            Scalar ds_dr_divr
+                                    = Scalar(12.0) * (rsq - ronsq) *
+                                      rsq_minus_r_cut_sq * xplor_denom_inv;
 
-                        // make modifications to the old pair energy and force
-                        pair_eng = old_pair_eng * s;
-                        force_divr =
-                                s * old_force_divr - ds_dr_divr * old_pair_eng;
+                            // make modifications to the old pair energy and force
+                            pair_eng = old_pair_eng * s;
+                            force_divr =
+                                    s * old_force_divr -
+                                    ds_dr_divr * old_pair_eng;
+                        }
+                    }
+                    // calculate the virial
+                    if (compute_virial) {
+                        Scalar force_div2r = Scalar(0.5) * force_divr;
+                        v.xx += dx.x * dx.x * force_div2r;
+                        v.xy += dx.x * dx.y * force_div2r;
+                        v.xz += dx.x * dx.z * force_div2r;
+                        v.yy += dx.y * dx.y * force_div2r;
+                        v.yz += dx.y * dx.z * force_div2r;
+                        v.zz += dx.z * dx.z * force_div2r;
+                    }
+
+                    // add up the force vector components
+                    force.x += dx.x * force_divr;
+                    force.y += dx.y * force_divr;
+                    force.z += dx.z * force_divr;
+
+                    force.w += pair_eng;
+                    // enclose the 3rd law use on CPU within a template check so it doesnt get compiled at all on gpu
+                    if(third_law) {
+                        auto third_law_compute = *((ThirdLaw *) TL);
+                        third_law_compute(dx, force_divr,
+                                          Scalar(0.5) * force_divr, pair_eng,
+                                          cur_j, compute_virial);
                     }
                 }
-                // calculate the virial
-                if (compute_virial) {
-                    Scalar force_div2r = Scalar(0.5) * force_divr;
-                    v.xx += dx.x * dx.x * force_div2r;
-                    v.xy += dx.x * dx.y * force_div2r;
-                    v.xz += dx.x * dx.z * force_div2r;
-                    v.yy += dx.y * dx.y * force_div2r;
-                    v.yz += dx.y * dx.z * force_div2r;
-                    v.zz += dx.z * dx.z * force_div2r;
-                }
-
-                // add up the force vector components
-                force.x += dx.x * force_divr;
-                force.y += dx.y * force_divr;
-                force.z += dx.z * force_divr;
-
-                force.w += pair_eng;
-
-                // enclose the 3rd law use on CPU within a template check so it doesnt get compiled at all on gpu
-                if constexpr (third_law){
-                    auto third_law_compute = *((ThirdLaw*)TL);
-                    third_law_compute(dx, force_divr, Scalar(0.5) * force_divr, pair_eng, cur_j, compute_virial);
-                }
-
             }
             // potential energy per particle must be halved
             force.w *= Scalar(0.5);
-            return std::make_pair(force, v);
+            return;
+            //return std::make_pair(force, v);
         }
+
+        Scalar4& force;
+        Virial& v;
     };
 
     template<class Interaction, class evaluator, unsigned shift_mode, bool compute_virial, bool third_law>

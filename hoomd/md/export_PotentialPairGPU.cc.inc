@@ -6,7 +6,7 @@
 
 // clang-format off
 #include "hoomd/md/PotentialPairGPU.h"
-#include "hoomd/md/PotentialPairFEPGPU.h"
+//#include "hoomd/md/PotentialPairFEPGPU.h"
 #include "hoomd/md/EvaluatorPair@_evaluator_cpp@.h"
 
 #define EVALUATOR_CLASS EvaluatorPair@_evaluator_cpp@
@@ -20,7 +20,7 @@ namespace md
 
 // Use CPU class from another compilation unit to reduce compile time and compiler memory usage.
 extern template class PotentialPair<EVALUATOR_CLASS>;
-extern template class PotentialPairFEP<EVALUATOR_CLASS>;
+//extern template class PotentialPairFEP<EVALUATOR_CLASS>;
 
 namespace detail
     {
@@ -28,7 +28,7 @@ namespace detail
 void EXPORT_FUNCTION(pybind11::module& m)
     {
     export_PotentialPairGPU<EVALUATOR_CLASS>(m, "PotentialPair@_evaluator@GPU");
-    export_PotentialPairFEPGPU<EVALUATOR_CLASS>(m, "PotentialPairFEP@_evaluator@GPU");
+    //export_PotentialPairFEPGPU<EVALUATOR_CLASS>(m, "PotentialPairFEP@_evaluator@GPU");
     }
 
     } // end namespace detail

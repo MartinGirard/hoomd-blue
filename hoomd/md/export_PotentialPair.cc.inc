@@ -6,7 +6,7 @@
 
 // clang-format off
 #include "hoomd/md/PotentialPair.h"
-#include "hoomd/md/PotentialPairFEP.h"
+//#include "hoomd/md/PotentialPairFEP.h"
 #include "hoomd/md/EvaluatorPair@_evaluator_cpp@.h"
 
 #define EVALUATOR_CLASS EvaluatorPair@_evaluator_cpp@
@@ -23,7 +23,7 @@ namespace detail
 void EXPORT_FUNCTION(pybind11::module& m)
     {
     export_PotentialPair<EVALUATOR_CLASS>(m, "PotentialPair@_evaluator@");
-    export_PotentialPairFEP<EVALUATOR_CLASS>(m, "PotentialPairFEP@_evaluator@");
+    //export_PotentialPairFEP<EVALUATOR_CLASS>(m, "PotentialPairFEP@_evaluator@");
     }
 
     } // end namespace detail

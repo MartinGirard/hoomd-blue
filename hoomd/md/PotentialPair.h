@@ -24,10 +24,9 @@
 
 #ifdef ENABLE_MPI
 #include "hoomd/Communicator.h"
-#include "GPUPairIterator.cuh"
-
 #endif
 
+#include "GPUPairIterator.cuh"
 /*! \file PotentialPair.h
     \brief Defines the template class for standard pair potentials
     \details The heart of the code that computes pair potentials is in this file.
@@ -83,7 +82,7 @@ namespace md
    parameters is defined by \a param_type in the potential evaluator class passed in. See the
    appropriate documentation for the evaluator for the definition of each element of the parameters.
 */
-template<class evaluator, class Interaction = DefaultPairInteraction> class PYBIND11_EXPORT PotentialPair : public ForceCompute
+template<class evaluator, class Interaction = DefaultPairInteraction> class  PotentialPair : public ForceCompute
     {
     public:
     //! Param type from evaluator
@@ -625,14 +624,8 @@ template<class evaluator, class Interaction> void PotentialPair<evaluator, Inter
     memset((void*)h_force.data, 0, sizeof(Scalar4) * m_force.getNumElements());
     memset((void*)h_virial.data, 0, sizeof(Scalar) * m_virial.getNumElements());
 
-    const NeighborData ndata{
-            .d_n_neigh = h_n_neigh.data,
-            .d_nlist = h_nlist.data,
-            .d_head_list = h_head_list.data,
-    };
+
     const PairParticleData pdata{
-        .d_pos = h_pos.data,
-        .d_charge = h_charge.data,
         .box = box,
         .rcutsq = h_rcutsq.data,
         .ron = h_ronsq.data,
@@ -640,23 +633,36 @@ template<class evaluator, class Interaction> void PotentialPair<evaluator, Inter
 
     // for each particle
     for (int i = 0; i < (int)m_pdata->getN(); i++) {
+        const NeighborData ndata{
+                .n_neigh = h_n_neigh.data[i],
+                .d_nlist = h_nlist.data,
+                .my_head = h_head_list.data[i],
+                .d_pos = h_pos.data,
+                .d_charge = h_charge.data,
+        };
 
-        PairIterator iterator(ndata, 0, i, 0);
+        iParticleData idata{
+                .postype = load(h_pos.data + i),
+                .qi = evaluator::needsCharge() ? load(h_charge.data + i) : Scalar(0)
+        };
 
-        auto FEval = Interaction(pdata);
-        std::pair<Scalar4, Virial> E;
+        PairIterator iterator(ndata, 0, 1);
+        Scalar4 F = {0., 0., 0., 0.};
+        Virial V{};
+        auto FEval = Interaction(pdata, F, V);
+        //std::pair<Scalar4, Virial> E;
 
         if(third_law) {
             ThirdLaw TL(h_force.data, h_virial.data, m_virial_pitch, m_pdata->getN());
-            E = dispatch<Interaction, evaluator>(FEval, m_shift_mode, compute_virial, third_law, iterator, m_typpair_idx, i, m_params.data(), nullptr, &TL);
+            dispatch<Interaction, evaluator>(FEval, m_shift_mode, compute_virial, third_law, iterator, m_typpair_idx, idata, m_params.data(), nullptr, &TL);
         } else{
-            E = dispatch<Interaction, evaluator>(FEval, m_shift_mode, compute_virial, third_law, iterator, m_typpair_idx, i, m_params.data(), nullptr,
+            dispatch<Interaction, evaluator>(FEval, m_shift_mode, compute_virial, third_law, iterator, m_typpair_idx, idata, m_params.data(), nullptr,
                                                  nullptr);
         }
 
         // finally, increment the force, potential energy and virial for particle i
-        auto F = E.first;
-        auto V = E.second;
+        //auto F = E.first;
+        //auto V = E.second;
 
         if (Interaction::reduce_and_write) { // only write if its not internally handled by the Interaction
             unsigned int mem_idx = i;
