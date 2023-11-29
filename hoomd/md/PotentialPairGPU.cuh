@@ -226,30 +226,28 @@ gpu_compute_pair_forces_shared_kernel(Scalar4* d_force,
     if (active)
         {
 
-        iParticleData idata{
+        const iParticleData idata{
             .postype = load(d_pos + idx),
             .qi = evaluator::needsCharge() ? load(d_charge + idx) : Scalar(0)
         };
 
-        NeighborData n{
-            .n_neigh  = d_n_neigh[idx],
+        const NeighborData n{
             .d_nlist = d_nlist,
             .my_head = d_head_list[idx],
             .d_pos = d_pos,
             .d_charge = d_charge,
+            .n_neigh  = d_n_neigh[idx],
         };
         PairIterator iterator(n, threadIdx.x, tpp);
 
-        PairParticleData pdata{
+        const PairParticleData pdata{
             .box = box,
             .rcutsq = enable_shared_cache ? s_rcutsq : d_rcutsq,
-            .ron = shift_mode == 2 ? (enable_shared_cache ? s_ronsq : d_ronsq) : 0
+            .ron = shift_mode == 2 ? (enable_shared_cache ? s_ronsq : d_ronsq) : nullptr
         };
-        auto FEval = Interaction(pdata, force, V);
+        const auto FEval = Interaction(pdata, force, V);
         const auto params = enable_shared_cache ? s_params : d_params;
         FEval.template operator()<evaluator, shift_mode, compute_virial>(iterator, typpair_idx, idata, params, nullptr);
-        //force = E.first;
-        //V = E.second;
         }
     // either the Interaction type takes care of outputing forces (eg triplet potentials) or we do it here (standard)
     if constexpr (Interaction::reduce_and_write()) {

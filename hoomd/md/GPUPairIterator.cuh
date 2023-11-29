@@ -41,7 +41,7 @@
 namespace hoomd::md {
 
     template<typename T>
-    T HOSTDEVICE inline load(T* a){
+    T HOSTDEVICE INLINE load(T* a){
 #ifdef __HIPCC__
         return __ldg(a);
 #else
@@ -50,48 +50,51 @@ namespace hoomd::md {
     };
 
     struct NeighborData {
-        const unsigned int n_neigh;
         const unsigned int* d_nlist;
         const size_t my_head;
         const Scalar4 *d_pos;
         const Scalar *d_charge;
+        const unsigned int n_neigh;
     };
 
     struct PairIterator {
-        HOSTDEVICE PairIterator(const NeighborData _data, unsigned tid, unsigned _tpp) :
+        HOSTDEVICE INLINE PairIterator(const NeighborData& _data, const unsigned tid, const unsigned _tpp) :
         data(_data), tpp(_tpp) {
-            if(tid % tpp < data.n_neigh) {
-                cur_j = load(data.d_nlist + data.my_head + tid % tpp);
-            }
             neigh_idx = tid % tpp;
-            valid = neigh_idx < data.n_neigh;
+            _valid = neigh_idx < data.n_neigh;
+            if(_valid)
+                cur_j = load(data.d_nlist + data.my_head + neigh_idx);
         }
 
         HOSTDEVICE INLINE PairIterator& operator++() {
-            if (neigh_idx + tpp < data.n_neigh) {
-                cur_j = load(data.d_nlist + data.my_head + neigh_idx + tpp);
-            }
             neigh_idx += tpp;
-            valid = neigh_idx < data.n_neigh;
+            _valid = neigh_idx < data.n_neigh;
+            if (_valid) {
+                cur_j = load(data.d_nlist + data.my_head + neigh_idx);
+            }
             return *this;
         }
 
-        HOSTDEVICE unsigned int operator*() const {
+        HOSTDEVICE INLINE unsigned int operator*() const {
             return cur_j;
         }
 
-        HOSTDEVICE auto position() const{return load(data.d_pos + cur_j);};
-        HOSTDEVICE Scalar charge() const{return load(data.d_charge + cur_j);};
+        HOSTDEVICE INLINE bool valid() const{
+            return _valid;
+        }
 
-        unsigned cur_j = 0, neigh_idx = 0;
+        HOSTDEVICE INLINE auto position() const{return load(data.d_pos + cur_j);};
+        HOSTDEVICE INLINE Scalar charge() const{return load(data.d_charge + cur_j);};
 
-        const NeighborData data;
+    protected:
+        unsigned cur_j = 0, neigh_idx;
+        const NeighborData& data;
         const unsigned tpp;
-        bool valid;
+        bool _valid;
     };
 
     struct PairParticleData {
-        const BoxDim box;
+        const BoxDim& box;
         const Scalar *rcutsq;
         const Scalar *ron;
     };
@@ -139,15 +142,15 @@ namespace hoomd::md {
     };
 
     struct BaseInteraction{
-        HOSTDEVICE BaseInteraction(PairParticleData pdada) : m_pdata(pdada){}
+        HOSTDEVICE BaseInteraction(const PairParticleData& pdada) : m_pdata(pdada){}
     protected:
-        const PairParticleData m_pdata;
+        const PairParticleData& m_pdata;
     };
 
 
     struct DefaultPairInteraction : public BaseInteraction{
 
-        HOSTDEVICE DefaultPairInteraction(PairParticleData pdata, Scalar4& f, Virial& _v) : BaseInteraction(pdata), force(f), v(_v){}
+        HOSTDEVICE DefaultPairInteraction(const PairParticleData& pdata, Scalar4& f, Virial& _v) : BaseInteraction(pdata), force(f), v(_v){}
 
         HOSTDEVICE constexpr static bool reduce_and_write() {
             return true;
@@ -161,23 +164,19 @@ namespace hoomd::md {
                            const void* extra,// required extra stuff
                            const ThirdLaw* TL = nullptr
                            ) // set the hook to nullptr to avoid usage unless specified
-                           {
-            //Scalar4 force = {0., 0., 0., 0.};
-            //Virial v{};
-            // read in the position of our particle.
-            Scalar4 postypei = idata.postype;
-            Scalar3 posi = make_scalar3(postypei.x, postypei.y, postypei.z);
+                           const {
+            const Scalar4 postypei = idata.postype;
+            const Scalar3 posi = make_scalar3(postypei.x, postypei.y, postypei.z);
 
-            while (it.valid) {
-                {
-                    auto cur_j = *it;
-                    Scalar4 postypej = it.position();
-                    Scalar qj = evaluator::needsCharge()? it.charge() : Scalar(0.0); // there's no load if charge is not needed
+            while (it.valid()) {
+
+                    const auto cur_j = *it;
+                    const Scalar4 postypej = it.position();
+                    const Scalar qj = evaluator::needsCharge()? it.charge(): 0.0;
                     ++it;
 
                     // get the neighbor's position
-                    Scalar3 posj = make_scalar3(postypej.x, postypej.y,
-                                                postypej.z);
+                    const Scalar3 posj = make_scalar3(postypej.x, postypej.y, postypej.z);
 
                     // calculate dr (with periodic boundary conditions)
                     Scalar3 dx = posi - posj;
@@ -186,17 +185,17 @@ namespace hoomd::md {
                     dx = m_pdata.box.minImage(dx);
 
                     // calculate r squared
-                    Scalar rsq = dot(dx, dx);
+                    const Scalar rsq = dot(dx, dx);
 
                     // access the per type pair parameters
-                    unsigned int typpair = typpair_idx(
+                    const unsigned int typpair = typpair_idx(
                             __scalar_as_int(postypei.w),
                             __scalar_as_int(postypej.w));
 
-                    Scalar ronsq =
-                            shift_mode == 2 ? *(m_pdata.ron + typpair) : Scalar(
-                                    0.0);
-                    Scalar rcutsq = *(m_pdata.rcutsq + typpair);
+                    const auto FF = forcefield+typpair;
+                    const Scalar ronsq =
+                            shift_mode == 2 ? m_pdata.ron[typpair] : Scalar(0.0);
+                    const Scalar rcutsq = m_pdata.rcutsq[typpair];
                     // design specifies that energies are shifted if
                     // 1) shift mode is set to shift
                     // or 2) shift mode is explor and ron > rcut
@@ -212,11 +211,13 @@ namespace hoomd::md {
                     Scalar force_divr = Scalar(0.0);
                     Scalar pair_eng = Scalar(0.0);
 
-                    evaluator eval(rsq, rcutsq, *(forcefield + typpair));
+                    evaluator eval(rsq, rcutsq, *FF);
                     if constexpr (evaluator::needsCharge())
                         eval.setCharge(idata.qi, qj);
 
                     eval.evalForceAndEnergy(force_divr, pair_eng, energy_shift);
+
+                    //printf("Interaction with neighbor %u, rsq=%f; has F = %f, U = %f\n", cur_j, rsq, force_divr, pair_eng);
 
                     if (shift_mode == 2) {
                         if (rsq >= ronsq && rsq < rcutsq) {
@@ -264,18 +265,17 @@ namespace hoomd::md {
 
                     force.w += pair_eng;
                     // enclose the 3rd law use on CPU within a template check so it doesnt get compiled at all on gpu
-                    if(third_law) {
+                    if constexpr (third_law) {
                         auto third_law_compute = *((ThirdLaw *) TL);
                         third_law_compute(dx, force_divr,
                                           Scalar(0.5) * force_divr, pair_eng,
                                           cur_j, compute_virial);
                     }
-                }
+
             }
             // potential energy per particle must be halved
             force.w *= Scalar(0.5);
             return;
-            //return std::make_pair(force, v);
         }
 
         Scalar4& force;
@@ -289,8 +289,6 @@ namespace hoomd::md {
                     return I.template operator()<evaluator, shift_mode, compute_virial, third_law>(args...);
                 }
     };
-
-
 
     template<class Interaction, class evaluator, unsigned shift_mode, bool third_law, class... Args>
     auto resolveVirial(Interaction& i, bool has_virial, Args... args){

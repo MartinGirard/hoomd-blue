@@ -634,11 +634,11 @@ template<class evaluator, class Interaction> void PotentialPair<evaluator, Inter
     // for each particle
     for (int i = 0; i < (int)m_pdata->getN(); i++) {
         const NeighborData ndata{
-                .n_neigh = h_n_neigh.data[i],
                 .d_nlist = h_nlist.data,
                 .my_head = h_head_list.data[i],
                 .d_pos = h_pos.data,
                 .d_charge = h_charge.data,
+                .n_neigh = h_n_neigh.data[i],
         };
 
         iParticleData idata{

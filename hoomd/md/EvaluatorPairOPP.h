@@ -135,8 +135,9 @@ class EvaluatorPairOPP
             fast::sincos(params.k * r - params.phi, eval_sin, eval_cos);
 
             // Compute energy
-            Scalar r_eta1_arg(params.C1 * fast::pow(r, -params.eta1));
-            Scalar r_to_eta2(fast::pow(r, -params.eta2));
+            Scalar logr = fast::log(r);
+            Scalar r_eta1_arg(params.C1 * fast::exp(-logr * params.eta1));//* fast::pow(r, -params.eta1));
+            Scalar r_to_eta2(fast::exp(-logr * params.eta2));//fast::pow(r, -params.eta2));
             Scalar r_eta2_arg(params.C2 * r_to_eta2 * eval_cos);
             pair_eng = r_eta1_arg + r_eta2_arg;
 
