@@ -15,6 +15,7 @@
 #include <hip/hip_runtime.h>
 #endif
 #include "hoomd/VectorMath.h"
+#include "EvaluatorTraits.h"
 #include <iostream>
 /*! \file EvaluatorPairDipole.h
     \brief Defines the dipole potential
@@ -35,7 +36,7 @@ namespace hoomd
     {
 namespace md
     {
-class EvaluatorPairDipole
+class EvaluatorPairDipole : public charge_traits
     {
     public:
     struct param_type
@@ -136,7 +137,7 @@ class EvaluatorPairDipole
                                    Scalar4& _quat_j,
                                    Scalar _rcutsq,
                                    const param_type& _params)
-        : dr(_dr), rcutsq(_rcutsq), q_i(0), q_j(0), quat_i(_quat_i), quat_j(_quat_j),
+        : dr(_dr), rcutsq(_rcutsq), quat_i(_quat_i), quat_j(_quat_j),
           mu_i {0, 0, 0}, mu_j {0, 0, 0}, A(_params.A), kappa(_params.kappa)
         {
         }
@@ -151,12 +152,6 @@ class EvaluatorPairDipole
     HOSTDEVICE static bool needsTags()
         {
         return false;
-        }
-
-    //! whether pair potential requires charges
-    HOSTDEVICE static bool needsCharge()
-        {
-        return true;
         }
 
     /// Whether the potential implements the energy_shift parameter
@@ -180,16 +175,6 @@ class EvaluatorPairDipole
         \param tag_j Tag of particle j
     */
     HOSTDEVICE void setTags(unsigned int tagi, unsigned int tagj) { }
-
-    //! Accept the optional charge values
-    /*! \param qi Charge of particle i
-        \param qj Charge of particle j
-    */
-    HOSTDEVICE void setCharge(Scalar qi, Scalar qj)
-        {
-        q_i = qi;
-        q_j = qj;
-        }
 
     //! Evaluate the force and energy
     /*! \param force Output parameter to write the computed force.
@@ -333,7 +318,6 @@ class EvaluatorPairDipole
     protected:
     Scalar3 dr;             //!< Stored vector pointing between particle centers of mass
     Scalar rcutsq;          //!< Stored rcutsq from the constructor
-    Scalar q_i, q_j;        //!< Stored particle charges
     Scalar4 quat_i, quat_j; //!< Stored quaternion of ith and jth particle from constructor
     vec3<Scalar> mu_i;      /// Magnetic moment for ith particle
     vec3<Scalar> mu_j;      /// Magnetic moment for jth particle

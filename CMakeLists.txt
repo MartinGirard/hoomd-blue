@@ -61,8 +61,8 @@ endif()
 # use C++17 as the CUDA standard until CUDA 12.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 14)
-set(CMAKE_HIP_STANDARD 14)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_HIP_STANDARD 17)
 
 # Enable compiler warnings on gcc and clang (common compilers used by developers)
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")

@@ -91,7 +91,7 @@ class EvaluatorPairMoliere
         }
 
     //! Moliere potential does not use particles charges
-    DEVICE static bool needsCharge()
+    DEVICE constexpr static bool needsCharge()
         {
         return false;
         }

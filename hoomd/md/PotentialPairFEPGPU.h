@@ -44,7 +44,7 @@ namespace md
 
     \sa export_PotentialPairGPU()
 */
-template<class evaluator> class PotentialPairFEPGPU : public PotentialPairFEP<evaluator>, public PotentialPairGPU<evaluator>
+template<class evaluator> class PotentialPairFEPGPU : public virtual PotentialPairFEP<evaluator>, public virtual PotentialPairGPU<evaluator>
     {
     public:
     //! Construct the pair potential

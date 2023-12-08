@@ -103,18 +103,6 @@ class EvaluatorPairOPP
         {
         }
 
-    //! OPP doesn't use charge
-    DEVICE static bool needsCharge()
-        {
-        return false;
-        }
-
-    //! Accept the optional charge values.
-    /*! \param qi Charge of particle i
-        \param qj Charge of particle j
-    */
-    DEVICE void setCharge(Scalar qi, Scalar qj) { }
-
     //! Evaluate the force and energy
     /*! \param force_divr Output parameter to write the computed force
      * divided by r.
@@ -126,7 +114,7 @@ class EvaluatorPairOPP
      *  we are beyond the cutoff
      */
     DEVICE bool evalForceAndEnergy(Scalar& force_divr, Scalar& pair_eng, bool energy_shift)
-        {
+        const {
         if (rsq < rcutsq)
             {
             // Get quantities need for both energy and force calculation
@@ -135,9 +123,9 @@ class EvaluatorPairOPP
             fast::sincos(params.k * r - params.phi, eval_sin, eval_cos);
 
             // Compute energy
-            Scalar logr = fast::log(r);
-            Scalar r_eta1_arg(params.C1 * fast::exp(-logr * params.eta1));//* fast::pow(r, -params.eta1));
-            Scalar r_to_eta2(fast::exp(-logr * params.eta2));//fast::pow(r, -params.eta2));
+            Scalar2 powers = fast::pow(r, Scalar2{-params.eta1, -params.eta2});
+            Scalar r_eta1_arg(params.C1 * powers.x);
+            Scalar r_to_eta2(powers.y);
             Scalar r_eta2_arg(params.C2 * r_to_eta2 * eval_cos);
             pair_eng = r_eta1_arg + r_eta2_arg;
 
@@ -149,8 +137,9 @@ class EvaluatorPairOPP
             if (energy_shift)
                 {
                 Scalar r_cut(fast::sqrt(rcutsq));
-                Scalar r_cut_eta1_arg(params.C1 * fast::pow(r_cut, -params.eta1));
-                Scalar r_cut_eta2_arg(params.C2 * fast::pow(r_cut, -params.eta2)
+                Scalar2 r_cut_powers = fast::pow(r_cut, Scalar2{-params.eta1, -params.eta2});
+                Scalar r_cut_eta1_arg(params.C1 * r_cut_powers.x);
+                Scalar r_cut_eta2_arg(params.C2 * r_cut_powers.y
                                       * fast::cos(params.k * r_cut - params.phi));
                 pair_eng -= r_cut_eta1_arg + r_cut_eta2_arg;
                 }

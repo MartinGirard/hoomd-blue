@@ -108,18 +108,6 @@ class EvaluatorPairBuckingham
         : rsq(_rsq), rcutsq(_rcutsq), A(_params.A), rho(_params.rho), C(_params.C)
         {
         }
-
-    //! Buckingham doesn't use charge
-    DEVICE static bool needsCharge()
-        {
-        return false;
-        }
-    //! Accept the optional charge values.
-    /*! \param qi Charge of particle i
-        \param qj Charge of particle j
-    */
-    DEVICE void setCharge(Scalar qi, Scalar qj) { }
-
     //! Evaluate the force and energy
     /*! \param force_divr Output parameter to write the computed force divided by r.
         \param pair_eng Output parameter to write the computed pair energy

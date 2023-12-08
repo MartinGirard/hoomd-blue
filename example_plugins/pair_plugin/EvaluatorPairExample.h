@@ -86,7 +86,7 @@ class EvaluatorPairExample
         }
 
     //! Example doesn't use charge
-    DEVICE static bool needsCharge()
+    DEVICE constexpr static bool needsCharge()
         {
         return false;
         }

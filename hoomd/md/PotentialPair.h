@@ -643,7 +643,7 @@ template<class evaluator, class Interaction> void PotentialPair<evaluator, Inter
 
         iParticleData idata{
                 .postype = load(h_pos.data + i),
-                .qi = evaluator::needsCharge() ? load(h_charge.data + i) : Scalar(0)
+                .qi = requires_charge<evaluator>::value ? load(h_charge.data + i) : Scalar(0)
         };
 
         PairIterator iterator(ndata, 0, 1);

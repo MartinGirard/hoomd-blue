@@ -159,7 +159,7 @@ class EvaluatorPairGB
         }
 
     //! whether pair potential requires charges
-    HOSTDEVICE static bool needsCharge()
+    HOSTDEVICE constexpr static bool needsCharge()
         {
         return false;
         }

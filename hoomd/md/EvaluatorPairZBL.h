@@ -74,7 +74,7 @@ class EvaluatorPairZBL
         }
 
     //! ZBL potential does not use particle charges
-    DEVICE static bool needsCharge()
+    DEVICE constexpr static bool needsCharge()
         {
         return false;
         }

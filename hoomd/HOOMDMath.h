@@ -40,9 +40,11 @@
 #ifdef __HIPCC__
 #define HOSTDEVICE __host__ __device__
 #define DEVICE __device__
+#define INLINE __forceinline__
 #else
 #define HOSTDEVICE
 #define DEVICE
+#define INLINE inline
 #endif
 
 namespace hoomd
@@ -349,12 +351,29 @@ inline HOSTDEVICE float pow(float x, float y)
 #endif
     }
 
+    //! compute multiple powers of the same base via exp(log)
+    inline HOSTDEVICE float2 pow(float x, float2 y){
+#ifdef __HIP_DEVICE_COMPILE__
+        float logx = __logf(x);
+        return {__expf(y.x * logx), __expf(y.y * logx)};
+#else
+        float logx = logf(x);
+        return {::expf(y.x * logx), ::expf(y.y * logx)};
+#endif
+    }
+
 //! Compute the pow of x,y with double precision via exp(log) refactoring - NOTE: UNDEFINED FOR
 //! NEGATIVE BASES
 inline HOSTDEVICE double pow(double x, double y)
     {
     return ::exp(y * log(x));
     }
+
+    //! compute multiple powers of the same base via exp(log), forces compiler to properly do elimination of the log
+    inline HOSTDEVICE double2 pow(double x, double2 y){
+    double logx = log(x);
+    return {::exp(logx * y.x), ::exp(logx * y.y)};
+}
 
 //! Compute the exp of x
 inline HOSTDEVICE float exp(float x)

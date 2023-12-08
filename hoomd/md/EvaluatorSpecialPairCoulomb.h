@@ -9,6 +9,7 @@
 #endif
 
 #include "hoomd/HOOMDMath.h"
+#include "EvaluatorTraits.h"
 
 /*! \file EvaluatorSpecialPairCoulomb.h
     \brief Defines the bond evaluator class for Coulomb interactions
@@ -71,7 +72,7 @@ struct special_coulomb_params
 //! Class for evaluating the Coulomb bond potential
 /*! See the EvaluatorPairLJ class for the meaning of the parameters
  */
-class EvaluatorSpecialPairCoulomb
+class EvaluatorSpecialPairCoulomb : public charge_product_traits
     {
     public:
     //! Define the parameter type used by this pair potential evaluator
@@ -84,21 +85,6 @@ class EvaluatorSpecialPairCoulomb
     DEVICE EvaluatorSpecialPairCoulomb(Scalar _rsq, const param_type& _params)
         : rsq(_rsq), scale(_params.alpha), rcutsq(_params.r_cutsq)
         {
-        }
-
-    //! Coulomb use charge
-    DEVICE static bool needsCharge()
-        {
-        return true;
-        }
-
-    //! Accept the optional charge values
-    /*! \param qi Charge of particle i
-        \param qj Charge of particle j
-    */
-    DEVICE void setCharge(Scalar qi, Scalar qj)
-        {
-        qiqj = qi * qj;
         }
 
     //! Evaluate the force and energy
@@ -138,7 +124,6 @@ class EvaluatorSpecialPairCoulomb
 
     protected:
     Scalar rsq;    //!< Stored rsq from the constructor
-    Scalar qiqj;   //!< product of charges from setCharge(qa, qb)
     Scalar scale;  //!< scaling factor to apply to Coulomb interaction
     Scalar rcutsq; //!< Stored rcutsq from the constructor
     };

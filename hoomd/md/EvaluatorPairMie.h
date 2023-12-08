@@ -108,7 +108,7 @@ class EvaluatorPairMie
         }
 
     //! Mie doesn't use charge
-    DEVICE static bool needsCharge()
+    DEVICE constexpr static bool needsCharge()
         {
         return false;
         }
@@ -133,16 +133,18 @@ class EvaluatorPairMie
         if (rsq < rcutsq && mie1 != 0)
             {
             Scalar r2inv = Scalar(1.0) / rsq;
-            Scalar rninv = fast::pow(r2inv, mie3 / Scalar(2.0));
-            Scalar rminv = fast::pow(r2inv, mie4 / Scalar(2.0));
+            Scalar2 r2pow = fast::pow(r2inv, Scalar2{mie3/ Scalar(2.0), mie4 / Scalar(2.0)});
+            Scalar rninv = r2pow.x;
+            Scalar rminv = r2pow.y;
             force_divr = r2inv * (mie3 * mie1 * rninv - mie4 * mie2 * rminv);
 
             pair_eng = mie1 * rninv - mie2 * rminv;
 
             if (energy_shift)
                 {
-                Scalar rcutninv = fast::pow(rcutsq, -mie3 / Scalar(2.0));
-                Scalar rcutminv = fast::pow(rcutsq, -mie4 / Scalar(2.0));
+                Scalar2 rcutpow = fast::pow(rcutsq, Scalar2{-mie3 / Scalar(2.0), -mie4 / Scalar(2.0)});
+                Scalar rcutninv = rcutpow.x;
+                Scalar rcutminv = rcutpow.y;
                 pair_eng -= mie1 * rcutninv - mie2 * rcutminv;
                 }
             return true;

@@ -21,6 +21,8 @@
 
 #ifdef __HIPCC__
 #include "hoomd/WarpTools.cuh"
+#include "EvaluatorTraits.h"
+
 #endif // __HIPCC__
 
 #include <assert.h>
@@ -85,6 +87,14 @@ namespace hoomd::md {
 
         HOSTDEVICE INLINE auto position() const{return load(data.d_pos + cur_j);};
         HOSTDEVICE INLINE Scalar charge() const{return load(data.d_charge + cur_j);};
+
+        HOSTDEVICE INLINE void reset(){
+            // we can reset the iterator by setting neigh_idx = neigh_idx % tpp since we always increment by tpp
+            neigh_idx = neigh_idx % tpp;
+            _valid = neigh_idx < data.n_neigh;
+            if(_valid)
+                cur_j = load(data.d_nlist + data.my_head + neigh_idx);
+        }
 
     protected:
         unsigned cur_j = 0, neigh_idx;
@@ -172,7 +182,7 @@ namespace hoomd::md {
 
                     const auto cur_j = *it;
                     const Scalar4 postypej = it.position();
-                    const Scalar qj = evaluator::needsCharge()? it.charge(): 0.0;
+                    const Scalar qj = requires_charge<evaluator>::value ? it.charge(): 0.0;
                     ++it;
 
                     // get the neighbor's position
@@ -200,9 +210,9 @@ namespace hoomd::md {
                     // 1) shift mode is set to shift
                     // or 2) shift mode is explor and ron > rcut
                     bool energy_shift = false;
-                    if  (shift_mode == 1)
+                    if constexpr (shift_mode == 1)
                         energy_shift = true;
-                    else if  (shift_mode == 2) {
+                    else if constexpr (shift_mode == 2) {
                         if (ronsq > rcutsq)
                             energy_shift = true;
                     }
@@ -212,12 +222,10 @@ namespace hoomd::md {
                     Scalar pair_eng = Scalar(0.0);
 
                     evaluator eval(rsq, rcutsq, *FF);
-                    if constexpr (evaluator::needsCharge())
+                    if constexpr (requires_charge<evaluator>::value)
                         eval.setCharge(idata.qi, qj);
 
                     eval.evalForceAndEnergy(force_divr, pair_eng, energy_shift);
-
-                    //printf("Interaction with neighbor %u, rsq=%f; has F = %f, U = %f\n", cur_j, rsq, force_divr, pair_eng);
 
                     if (shift_mode == 2) {
                         if (rsq >= ronsq && rsq < rcutsq) {
@@ -266,7 +274,7 @@ namespace hoomd::md {
                     force.w += pair_eng;
                     // enclose the 3rd law use on CPU within a template check so it doesnt get compiled at all on gpu
                     if constexpr (third_law) {
-                        auto third_law_compute = *((ThirdLaw *) TL);
+                        auto third_law_compute = *(TL);
                         third_law_compute(dx, force_divr,
                                           Scalar(0.5) * force_divr, pair_eng,
                                           cur_j, compute_virial);

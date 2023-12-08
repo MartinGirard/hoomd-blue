@@ -118,7 +118,7 @@ class EvaluatorPairExpandedLJ
         }
 
     //! ExpandedLJ does not use charge
-    DEVICE static bool needsCharge()
+    DEVICE constexpr static bool needsCharge()
         {
         return false;
         }

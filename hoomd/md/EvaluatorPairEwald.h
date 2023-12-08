@@ -25,6 +25,8 @@
 #define HOSTDEVICE
 #endif
 
+#include "EvaluatorTraits.h"
+
 namespace hoomd
     {
 namespace md
@@ -43,7 +45,7 @@ namespace md
    \frac{\alpha}{2\kappa}\right) \exp(\alpha r)+ \mathrm{erfc}\left(\kappa r - \frac{\alpha}{2
    \kappa}\right) \exp(-\alpha r)\right] \f]
 */
-class EvaluatorPairEwald
+class EvaluatorPairEwald : public charge_product_traits
     {
     public:
     //! Define the parameter type used by this pair potential evaluator
@@ -93,20 +95,6 @@ class EvaluatorPairEwald
     DEVICE EvaluatorPairEwald(Scalar _rsq, Scalar _rcutsq, const param_type& _params)
         : rsq(_rsq), rcutsq(_rcutsq), kappa(_params.kappa), alpha(_params.alpha)
         {
-        }
-
-    //! Ewald uses charge !!!
-    DEVICE static bool needsCharge()
-        {
-        return true;
-        }
-    //! Accept the optional charge values.
-    /*! \param qi Charge of particle i
-        \param qj Charge of particle j
-    */
-    DEVICE void setCharge(Scalar qi, Scalar qj)
-        {
-        qiqj = qi * qj;
         }
 
     //! Evaluate the force and energy

@@ -42,7 +42,7 @@ namespace md
 
     If \epsilon_{RF} is zero, it will be treated as infinity.
 */
-class EvaluatorPairReactionField
+class EvaluatorPairReactionField : public charge_product_traits
     {
     public:
     //! Define the parameter type used by this pair potential evaluator
@@ -92,22 +92,6 @@ class EvaluatorPairReactionField
         : rsq(_rsq), rcutsq(_rcutsq), epsilon(_params.eps), epsrf(_params.eps_rf),
           use_charge(_params.use_charge), qiqj(1.0)
         {
-        }
-
-    //! ReactionField uses charge
-    DEVICE static bool needsCharge()
-        {
-        return true;
-        }
-
-    //! Accept the optional charge values
-    /*! \param qi Charge of particle i
-        \param qj Charge of particle j
-    */
-    DEVICE void setCharge(Scalar qi, Scalar qj)
-        {
-        if (use_charge)
-            qiqj = qi * qj;
         }
 
     //! Evaluate the force and energy

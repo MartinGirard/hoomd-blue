@@ -23,7 +23,7 @@ namespace detail
 void EXPORT_FUNCTION(pybind11::module& m)
     {
     export_PotentialPair<EVALUATOR_CLASS>(m, "PotentialPair@_evaluator@");
-    //export_PotentialPairFEP<EVALUATOR_CLASS>(m, "PotentialPairFEP@_evaluator@");
+    //export_PotentialPair<EVALUATOR_CLASS, FEPPairInteraction>(m, "PotentialPairFEP@_evaluator@");
     }
 
     } // end namespace detail

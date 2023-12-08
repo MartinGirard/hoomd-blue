@@ -43,7 +43,7 @@ namespace hoomd
 namespace md
     {
 
-template<class evaluator> class PotentialPairFEP : public virtual PotentialPair<evaluator>
+template<class evaluator> class PYBIND11_EXPORT PotentialPairFEP : public virtual PotentialPair<evaluator>
     {
     public:
 
