@@ -41,15 +41,15 @@ set(_md_sources module-md.cc
                    NeighborListTree.cc
                    OPLSDihedralForceCompute.cc
                    PPPMForceCompute.cc
+                   PeriodicImproperForceCompute.cc
                    TableAngleForceCompute.cc
                    TableDihedralForceCompute.cc
                    TwoStepBD.cc
-                   TwoStepBerendsen.cc
                    TwoStepLangevinBase.cc
                    TwoStepLangevin.cc
-                   TwoStepNPTMTK.cc
-                   TwoStepNVE.cc
-                   TwoStepNVTMTK.cc
+                   TwoStepConstantVolume.cc
+                   TwoStepConstantPressure.cc
+                   Thermostat.cc
                    TwoStepNVTAlchemy.cc
         VirtualSite.cpp
                    WallData.cc
@@ -78,7 +78,7 @@ set(_md_headers ActiveForceComputeGPU.h
                 ComputeThermoHMA.h
                 ComputeThermoTypes.h
                 ComputeThermoHMATypes.h
-	        ConstantForceComputeGPU.h
+                ConstantForceComputeGPU.h
                 ConstantForceCompute.h
                 CosineSqAngleForceComputeGPU.h
                 CosineSqAngleForceCompute.h
@@ -89,6 +89,7 @@ set(_md_headers ActiveForceComputeGPU.h
                 EvaluatorSpecialPairLJ.h
                 EvaluatorSpecialPairCoulomb.h
                 EvaluatorExternalElectricField.h
+		EvaluatorExternalMagneticField.h
                 EvaluatorExternalPeriodic.h
                 EvaluatorPairALJ.h
                 EvaluatorPairBuckingham.h
@@ -99,6 +100,7 @@ set(_md_headers ActiveForceComputeGPU.h
                 EvaluatorPairEwald.h
                 EvaluatorPairForceShiftedLJ.h
                 EvaluatorPairGauss.h
+                EvaluatorPairExpandedGaussian.h
                 EvaluatorPairGB.h
                 EvaluatorPairLJ.h
                 EvaluatorPairLJ1208.h
@@ -171,6 +173,9 @@ set(_md_headers ActiveForceComputeGPU.h
                 PotentialSpecialPair.h
                 PotentialTersoffGPU.h
                 PotentialTersoff.h
+                PeriodicImproper.h
+                PeriodicImproperForceCompute.h
+                PeriodicImproperForceComputeGPU.h
                 PPPMForceComputeGPU.h
                 PPPMForceCompute.h
                 TableAngleForceComputeGPU.h
@@ -182,23 +187,18 @@ set(_md_headers ActiveForceComputeGPU.h
                 TwoStepRATTLEBDGPU.cuh
                 TwoStepBD.h
                 TwoStepRATTLEBD.h
-                TwoStepBerendsenGPU.h
-                TwoStepBerendsen.h
                 TwoStepLangevinBase.h
                 TwoStepLangevinGPU.h
                 TwoStepRATTLELangevinGPU.h
                 TwoStepRATTLELangevinGPU.cuh
                 TwoStepLangevin.h
                 TwoStepRATTLELangevin.h
-                TwoStepNPTMTKGPU.h
-                TwoStepNPTMTK.h
                 TwoStepRATTLENVEGPU.h
                 TwoStepRATTLENVEGPU.cuh
                 TwoStepRATTLENVE.h
-                TwoStepNVEGPU.h
-                TwoStepNVE.h
-                TwoStepNVTMTKGPU.h
-                TwoStepNVTMTK.h
+                TwoStepConstantVolume.h
+                TwoStepConstantVolumeGPU.h
+                TwoStepConstantPressure.h
                 AlchemostatTwoStep.h
                 TwoStepNVTAlchemy.h
         VirtualSite.h
@@ -231,15 +231,14 @@ list(APPEND _md_sources ActiveForceComputeGPU.cc
                            NeighborListGPUStencil.cc
                            NeighborListGPUTree.cc
                            OPLSDihedralForceComputeGPU.cc
+                           PeriodicImproperForceComputeGPU.cc
                            PPPMForceComputeGPU.cc
                            TableAngleForceComputeGPU.cc
                            TableDihedralForceComputeGPU.cc
                            TwoStepBDGPU.cc
-                           TwoStepBerendsenGPU.cc
                            TwoStepLangevinGPU.cc
-                           TwoStepNPTMTKGPU.cc
-                           TwoStepNVEGPU.cc
-                           TwoStepNVTMTKGPU.cc
+                           TwoStepConstantVolumeGPU.cc
+                           TwoStepConstantPressureGPU.cc
                            MuellerPlatheFlowGPU.cc
                            CosineSqAngleForceComputeGPU.cc
                            )
@@ -267,17 +266,17 @@ set(_md_cu_sources ActiveForceComputeGPU.cu
                       NeighborListGPUStencil.cu
                       NeighborListGPUTree.cu
                       OPLSDihedralForceGPU.cu
+                      PeriodicImproperForceGPU.cu
                       PPPMForceComputeGPU.cu
                       TableAngleForceGPU.cu
                       TableDihedralForceGPU.cu
                       TwoStepBDGPU.cu
-                      TwoStepBerendsenGPU.cu
                       TwoStepLangevinGPU.cu
                       TwoStepRATTLELangevinGPU.cu
-                      TwoStepNPTMTKGPU.cu
+                      TwoStepConstantPressureGPU.cu
+                      TwoStepConstantVolumeGPU.cu
                       TwoStepNVEGPU.cu
                       TwoStepRATTLENVEGPU.cu
-                      TwoStepNVTMTKGPU.cu
                       MuellerPlatheFlowGPU.cu
                       CosineSqAngleForceGPU.cu
                       )
@@ -460,7 +459,7 @@ foreach(_evaluator ${_triplets})
     endif()
 endforeach()
 
-set(_external_evaluators Periodic ElectricField)
+set(_external_evaluators Periodic ElectricField MagneticField)
 
 foreach(_evaluator ${_external_evaluators})
     configure_file(export_PotentialExternal.cc.inc
@@ -550,7 +549,9 @@ set(_pair_evaluators Buckingham
                      TWF
                      LJGauss
                      ForceShiftedLJ
-                     Table)
+                     Table
+                     ExpandedGaussian)
+
 
 foreach(_evaluator ${_pair_evaluators})
     set(_evaluator_cpp ${_evaluator})
@@ -587,7 +588,7 @@ foreach(_evaluator ${_alchemical_pair_evaluators})
     set(_md_sources ${_md_sources} export_PotentialPairAlchemical${_evaluator}.cc)
 endforeach()
 
-pybind11_add_module(_md SHARED ${_md_sources} ${_cuda_sources} ${DFFT_SOURCES} ${_md_headers} NO_EXTRAS)
+hoomd_add_module(_md SHARED ${_md_sources} ${_cuda_sources} ${DFFT_SOURCES} ${_md_headers} NO_EXTRAS)
 # alias into the HOOMD namespace so that plugins and symlinked components both work
 add_library(HOOMD::_md ALIAS _md)
 
@@ -607,8 +608,6 @@ endif()
 if (ENABLE_HIP)
     target_link_libraries(_md PRIVATE neighbor)
 endif()
-
-fix_cudart_rpath(_md)
 
 # install the library
 install(TARGETS _md EXPORT HOOMDTargets
@@ -661,12 +660,7 @@ add_subdirectory(alchemy)
 add_subdirectory(tune)
 
 if (BUILD_TESTING)
-    # add_subdirectory(test-py)
     add_subdirectory(test)
 endif()
 
 add_subdirectory(pytest)
-
-if (BUILD_VALIDATION)
-    # add_subdirectory(validation)
-endif()

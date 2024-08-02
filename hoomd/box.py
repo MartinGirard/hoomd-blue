@@ -1,4 +1,4 @@
-# Copyright (c) 2009-2023 The Regents of the University of Michigan.
+# Copyright (c) 2009-2024 The Regents of the University of Michigan.
 # Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 """Implement Box."""
@@ -141,29 +141,13 @@ class Box:
 
         \\vec{r}_{ij} = \\mathrm{minimum\\_image}(\\vec{r}_j - \\vec{r}_i)
 
-    When running simulations with a fixed box size, you use the particle images
+    When running simulations with a fixed box size, use the particle images
     :math:`\\vec{n}` to compute the unwrapped coordinates:
 
     .. math::
 
         \\vec{r}_\\mathrm{unwrapped} = \\vec{r} + n_x \\vec{a}_1
             + n_y \\vec{a}_2 + n_z \\vec{a}_3
-
-    .. rubric:: The Box class
-
-    Simulation boxes in hoomd are specified by six parameters, ``Lx``, ``Ly``,
-    ``Lz``, ``xy``, ``xz``, and ``yz``. `Box` provides a way to specify all six
-    parameters for a given box and perform some common operations with them. A
-    `Box` can be stored in a GSD file, passed to an initialization method or to
-    assigned to a saved `State` variable (``state.box = new_box``) to set the
-    simulation box.
-
-    Access attributes directly::
-
-        box = hoomd.Box.cube(L=20)
-        box.xy = 1.0
-        box.yz = 0.5
-        box.Lz = 40
 
     .. rubric:: Two dimensional systems
 
@@ -176,15 +160,19 @@ class Box:
     .. rubric:: Factory Methods
 
     `Box` has factory methods to enable easier creation of boxes: `cube`,
-    `square`, `from_matrix`, and `from_box`. See the method documentation for
-    usage.
+    `square`, `from_matrix`, `from_basis_vectors`, and `from_box`. See each
+    method's documentation for more details.
 
-    .. rubric:: Examples
+    .. rubric:: Example:
 
-    * Cubic box with given length: ``hoomd.Box.cube(L=1)``
-    * Square box with given length: ``hoomd.Box.square(L=1)``
-    * From an upper triangular matrix: ``hoomd.Box.from_matrix(matrix)``
-    * Specify values: ``hoomd.Box(Lx=1., Ly=2., Lz=3., xy=1., xz=2., yz=3.)``
+    .. code-block:: python
+
+        box = hoomd.Box(Lx=10, Ly=20, Lz=30, xy=0.5, xz=0.2, yz=0.1)
+
+    See Also:
+        `hoomd.State.box`
+
+        `hoomd.State.set_box`
     """
 
     # Constructors
@@ -203,6 +191,12 @@ class Box:
 
         Returns:
             hoomd.Box: The created 3D box.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box = hoomd.Box.cube(L=13)
         """
         return cls(L, L, L, 0, 0, 0)
 
@@ -215,30 +209,125 @@ class Box:
 
         Returns:
             hoomd.Box: The created 2D box.
+
+        .. code-block:: python
+
+            box = hoomd.Box.square(L=128)
         """
         return cls(L, L, 0, 0, 0, 0)
 
     @classmethod
+    def from_basis_vectors(cls, box_matrix):
+        r"""Initialize a Box instance from a box matrix.
+
+        Args:
+            box_matrix ((3, 3) `numpy.ndarray` of `float`): A 3x3 matrix
+                or list of lists representing a set of lattice basis vectors.
+
+        Note:
+           The created box will be rotated with respect to the lattice basis. As
+           a consequence the output of `to_matrix` will not be the same as the
+           input provided to this function. This function also returns a
+           rotation matrix comensurate with this transformation. Using this
+           rotation matrix users can rotate the original points into the new box
+           by applying the rotation to the points.
+
+        Note:
+           When passing a 2D basis vectors, the third vector should be set to
+           all zeros, while first two vectors should have the last element set
+           to zero.
+
+        Returns:
+            tuple[hoomd.Box, numpy.ndarray]: A tuple containing:
+                - hoomd.Box: The created box configured according to the given
+                  basis vectors.
+                - numpy.ndarray: A 3x3 floating-point rotation matrix that can
+                  be used to transform the original basis vectors to align with
+                  the new box basis vectors.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            points = np.array([[0, 0, 0], [0.5, 0, 0], [0.25, 0.25, 0]])
+            box, rotation = hoomd.Box.from_basis_vectors(
+                box_matrix = [[ 1,  1,  0],
+                              [ 1, -1,  0],
+                              [ 0,  0,  1]])
+            rotated_points = rotation @ points
+        """
+        box_matrix = np.asarray(box_matrix, dtype=np.float64)
+        if box_matrix.shape != (3, 3):
+            raise ValueError("Box matrix must be a 3x3 matrix.")
+        v0 = box_matrix[:, 0]
+        v1 = box_matrix[:, 1]
+        v2 = box_matrix[:, 2]
+        Lx = np.sqrt(np.dot(v0, v0))
+        a2x = np.dot(v0, v1) / Lx
+        Ly = np.sqrt(np.dot(v1, v1) - a2x * a2x)
+        xy = a2x / Ly
+        v0xv1 = np.cross(v0, v1)
+        v0xv1mag = np.sqrt(np.dot(v0xv1, v0xv1))
+        Lz = np.dot(v2, v0xv1) / v0xv1mag
+        if Lz != 0:
+            a3x = np.dot(v0, v2) / Lx
+            xz = a3x / Lz
+            yz = (np.dot(v1, v2) - a2x * a3x) / (Ly * Lz)
+            upper_triangular_box_matrix = np.array([[Lx, Ly * xy, Lz * xz],
+                                                    [0, Ly, Lz * yz],
+                                                    [0, 0, Lz]])
+        else:
+            xz = yz = 0
+            if not (np.allclose(v2, [0, 0, 0]) and np.allclose(v0[2], 0)
+                    and np.allclose(v1[2], 0)):
+                error_string = ("A 2D box matrix must have a third vector and"
+                                "third component of first two vectors set to"
+                                "zero.")
+                raise ValueError(error_string)
+            upper_triangular_box_matrix = np.array([[Lx, Ly * xy], [0, Ly]])
+            box_matrix = box_matrix[:2, :2]
+
+        rotation = np.linalg.solve(upper_triangular_box_matrix, box_matrix)
+
+        if Lz == 0:
+            rotation = np.zeros((3, 3))
+            rotation[:2, :2] = box_matrix
+            rotation[2, 2] = 1
+
+        return cls(Lx=Lx, Ly=Ly, Lz=Lz, xy=xy, xz=xz, yz=yz), rotation
+
+    @classmethod
     def from_matrix(cls, box_matrix):
-        """Create a box from an upper triangular matrix.
+        r"""Create a box from an upper triangular matrix.
 
         Args:
             box_matrix ((3, 3) `numpy.ndarray` of `float`): An upper
                 triangular matrix representing a box. The values for ``Lx``,
                 ``Ly``, ``Lz``, ``xy``, ``xz``, and ``yz`` are related to the
-                matrix by the following expressions.
+                matrix:
 
-                .. code-block:: python
 
-                    [[Lx, Ly * xy, Lz * xz],
-                    [0,  Ly,      Lz * yz],
-                    [0,  0,       Lz]]
+                .. math::
 
+                    \begin{bmatrix}
+                    L_x & L_y \cdot xy & L_z \cdot xz \\
+                    0 & L_y & L_z \cdot yz \\
+                    0 & 0 & L_z
+                    \end{bmatrix}
 
         Returns:
             hoomd.Box: The created box.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box = hoomd.Box.from_matrix(
+                box_matrix = [[10, 12, 14],
+                              [0, 8, 16],
+                              [0, 0, 18]])
         """
-        box_matrix = np.asarray(box_matrix)
+        box_matrix = np.asarray(box_matrix, dtype=np.float64)
         if box_matrix.shape != (3, 3):
             raise ValueError("Box matrix must be a 3x3 matrix.")
         if not np.allclose(box_matrix, np.triu(box_matrix)):
@@ -272,6 +361,12 @@ class Box:
 
         Returns:
             hoomd.Box: The resulting box object.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box = hoomd.Box.from_box(box=[10, 20, 30, 0.5, 0.2, 0.1])
         """
         if np.asarray(box).shape == (3, 3):
             # Handles 3x3 matrices
@@ -315,6 +410,13 @@ class Box:
 
         If ``Lz == 0``, the box is treated as 2D, otherwise it is 3D. This
         property is not settable.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            if box.dimensions == 2:
+                pass
         """
         return 2 if self.is2D else 3
 
@@ -324,6 +426,13 @@ class Box:
 
         If ``Lz == 0``, the box is treated as 2D, otherwise it is 3D. This
         property is not settable.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            if box.is2D:
+                pass
         """
         return self.Lz == 0
 
@@ -334,6 +443,12 @@ class Box:
         :math:`[\\mathrm{length}]`.
 
         Can be set with a float which sets all lengths, or a length 3 vector.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box.L = (15, 30, 60)
         """
         return _vec3_to_array(self._cpp_obj.getL())
 
@@ -347,7 +462,14 @@ class Box:
     @property
     def Lx(self):  # noqa: N802: Allow function name
         """float: The length of the box in the x dimension \
-        :math:`[\\mathrm{length}]`."""
+        :math:`[\\mathrm{length}]`.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box.Lx = 15
+        """
         return self.L[0]
 
     @Lx.setter
@@ -359,7 +481,14 @@ class Box:
     @property
     def Ly(self):  # noqa: N802: Allow function name
         """float: The length of the box in the y dimension \
-        :math:`[\\mathrm{length}]`."""
+        :math:`[\\mathrm{length}]`.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box.Ly = 30
+        """
         return self.L[1]
 
     @Ly.setter
@@ -371,7 +500,14 @@ class Box:
     @property
     def Lz(self):  # noqa: N802: Allow function name
         """float: The length of the box in the z dimension \
-        :math:`[\\mathrm{length}]`."""
+        :math:`[\\mathrm{length}]`.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box.Lz = 60
+        """
         return self.L[2]
 
     @Lz.setter
@@ -387,6 +523,12 @@ class Box:
 
         Can be set using one tilt for all axes or three tilts. If the box is 2D
         ``xz`` and ``yz`` will automatically be set to zero.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box.tilts = (1.1, 0.8, 0.2)
         """
         return np.array([self.xy, self.xz, self.yz])
 
@@ -399,7 +541,14 @@ class Box:
 
     @property
     def xy(self):
-        """float: The tilt for the xy plane."""
+        """float: The tilt for the xy plane.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box.xy = 1.1
+        """
         return self._cpp_obj.getTiltFactorXY()
 
     @xy.setter
@@ -408,7 +557,14 @@ class Box:
 
     @property
     def xz(self):
-        """float: The tilt for the xz plane."""
+        """float: The tilt for the xz plane.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box.xz = 0.8
+        """
         return self._cpp_obj.getTiltFactorXZ()
 
     @xz.setter
@@ -419,7 +575,14 @@ class Box:
 
     @property
     def yz(self):
-        """float: The tilt for the yz plane."""
+        """float: The tilt for the yz plane.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box.yz = 0.2
+        """
         return self._cpp_obj.getTiltFactorYZ()
 
     @yz.setter
@@ -432,7 +595,14 @@ class Box:
     @property
     def periodic(self):
         """(3, ) `numpy.ndarray` of `bool`: The periodicity of each \
-        dimension."""
+        dimension.
+
+        `periodic` is always ``(True, True, True)`` for the box associated with
+        the simulation `State`. Some components of `periodic` may be `False` in
+        the `hoomd.data.LocalSnapshot` box attribute in MPI domain decomposition
+        simulations. This indicates which box directions are communicated with
+        neighboring ranks (`False`) and which are not (`True`).
+        """
         return _vec3_to_array(self._cpp_obj.getPeriodic(), bool)
 
     @property
@@ -444,6 +614,12 @@ class Box:
 
         When setting volume the aspect ratio of the box is maintained while the
         lengths are changed.
+
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            box.volume = 2000
         """
         return self._cpp_obj.getVolume(self.is2D)
 
@@ -455,12 +631,17 @@ class Box:
         """(3, 3) `numpy.ndarray` `float`: The upper triangular matrix that \
         defines the box.
 
-        .. code-block:: python
+        .. code-block::
 
             [[Lx, Ly * xy, Lz * xz],
              [0,  Ly,      Lz * yz],
              [0,  0,       Lz]]
 
+        .. rubric:: Example:
+
+        .. code-block:: python
+
+            matrix = box.to_matrix()
         """
         Lx, Ly, Lz = self.L
         xy, xz, yz = self.tilts
@@ -479,6 +660,16 @@ class Box:
 
         Returns:
             ``self``
+
+        .. rubric:: Examples:
+
+        .. code-block:: python
+
+            box.scale(2)
+
+        .. code-block:: python
+
+            box.scale((1, 2, 4))
         """
         s = np.asarray(s, dtype=float)
         self.L *= s

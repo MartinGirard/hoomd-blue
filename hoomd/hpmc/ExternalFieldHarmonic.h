@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 #ifndef _EXTERNAL_FIELD_HARMONIC_H_
@@ -259,7 +259,8 @@ template<class Shape> class ExternalFieldHarmonic : public ExternalFieldMono<Sha
     double calculateDeltaE(uint64_t timestep,
                            const Scalar4* const position_old_arg,
                            const Scalar4* const orientation_old_arg,
-                           const BoxDim& box_old) override
+                           const BoxDim& box_old,
+                           const Scalar3& origin_old) override
         {
         ArrayHandle<Scalar4> h_pos(m_pdata->getPositions(),
                                    access_location::host,
@@ -368,13 +369,9 @@ template<class Shape> class ExternalFieldHarmonic : public ExternalFieldMono<Sha
         ArrayHandle<unsigned int> h_tags(m_pdata->getTags(),
                                          access_location::host,
                                          access_mode::read);
-        int3 dummy = make_int3(0, 0, 0);
         vec3<Scalar> origin(m_pdata->getOrigin());
         const BoxDim box = this->m_pdata->getGlobalBox();
         vec3<Scalar> r0 = m_reference_positions[h_tags.data[index]];
-        Scalar3 t = vec_to_scalar3(position - origin);
-        box.wrap(t, dummy);
-        vec3<Scalar> shifted_pos(t);
         vec3<Scalar> dr = vec3<Scalar>(box.minImage(vec_to_scalar3(r0 - position + origin)));
         Scalar k = (*m_k_translational)(timestep);
         return Scalar(0.5) * k * dot(dr, dr);

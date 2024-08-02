@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 /*!
@@ -30,7 +30,8 @@ class PYBIND11_EXPORT CellThermoComputeGPU : public mpcd::CellThermoCompute
     {
     public:
     //! Constructor
-    CellThermoComputeGPU(std::shared_ptr<mpcd::SystemData> sysdata);
+    CellThermoComputeGPU(std::shared_ptr<SystemDefinition> sysdef,
+                         std::shared_ptr<mpcd::CellList> cl);
 
     //! Destructor
     virtual ~CellThermoComputeGPU();
@@ -60,12 +61,6 @@ class PYBIND11_EXPORT CellThermoComputeGPU : public mpcd::CellThermoCompute
         m_tmp_thermo; //!< Temporary array for holding cell data
     GPUFlags<mpcd::detail::cell_thermo_element> m_reduced; //!< Flags to hold reduced sum
     };
-
-namespace detail
-    {
-//! Export the CellThermoComputeGPU class to python
-void export_CellThermoComputeGPU(pybind11::module& m);
-    } // end namespace detail
     } // end namespace mpcd
     } // end namespace hoomd
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 #include "UpdaterBoxMC.h"
@@ -20,9 +20,9 @@ UpdaterBoxMC::UpdaterBoxMC(std::shared_ptr<SystemDefinition> sysdef,
                            std::shared_ptr<Variant> P)
     : Updater(sysdef, trigger), m_mc(mc), m_beta_P(P), m_volume_delta(0.0), m_volume_weight(0.0),
       m_ln_volume_delta(0.0), m_ln_volume_weight(0.0), m_volume_mode("standard"), m_volume_A1(0.0),
-      m_volume_A2(0.0), m_length_delta {0.0, 0.0, 0.0},
-      m_length_weight(0.0), m_shear_delta {0.0, 0.0, 0.0}, m_shear_weight(0.0), m_shear_reduce(0.0),
-      m_aspect_delta(0.0), m_aspect_weight(0.0)
+      m_volume_A2(0.0), m_length_delta {0.0, 0.0, 0.0}, m_length_weight(0.0),
+      m_shear_delta {0.0, 0.0, 0.0}, m_shear_weight(0.0), m_shear_reduce(0.0), m_aspect_delta(0.0),
+      m_aspect_weight(0.0)
     {
     m_exec_conf->msg->notice(5) << "Constructing UpdaterBoxMC" << std::endl;
 
@@ -243,12 +243,11 @@ inline bool UpdaterBoxMC::box_resize_trial(Scalar Lx,
 
     BoxDim curBox = m_pdata->getGlobalBox();
     double delta_U_pair = 0;
+    double delta_U_external = 0;
 
-    if (m_mc->getPatchEnergy())
-        {
-        // energy of old configuration
-        delta_U_pair -= m_mc->computePatchEnergy(timestep);
-        }
+    // energy of old configuration
+    delta_U_pair -= m_mc->computeTotalPairEnergy(timestep);
+    delta_U_external -= m_mc->computeTotalExternalEnergy(false);
 
     // Attempt box resize and check for overlaps
     BoxDim newBox = m_pdata->getGlobalBox();
@@ -256,22 +255,28 @@ inline bool UpdaterBoxMC::box_resize_trial(Scalar Lx,
     newBox.setL(make_scalar3(Lx, Ly, Lz));
     newBox.setTiltFactors(xy, xz, yz);
 
+    Scalar3 old_origin = m_pdata->getOrigin();
     bool allowed = m_mc->attemptBoxResize(timestep, newBox);
+    Scalar3 new_origin = m_pdata->getOrigin();
+    Scalar3 origin_shift = new_origin - old_origin;
 
-    if (allowed && m_mc->getPatchEnergy())
+    if (allowed)
         {
-        delta_U_pair += m_mc->computePatchEnergy(timestep);
+        delta_U_pair += m_mc->computeTotalPairEnergy(timestep);
+        delta_U_external += m_mc->computeTotalExternalEnergy(true);
         }
 
-    double delta_U_external = 0;
     if (allowed && m_mc->getExternalField())
         {
         ArrayHandle<Scalar4> h_pos_backup(m_pos_backup,
                                           access_location::host,
                                           access_mode::readwrite);
-        Scalar ext_energy
-            = m_mc->getExternalField()->calculateDeltaE(timestep, h_pos_backup.data, NULL, curBox);
-        delta_U_external = ext_energy;
+        Scalar ext_energy = m_mc->getExternalField()->calculateDeltaE(timestep,
+                                                                      h_pos_backup.data,
+                                                                      NULL,
+                                                                      curBox,
+                                                                      old_origin);
+        delta_U_external += ext_energy;
         }
 
     double p = hoomd::detail::generate_canonical<double>(rng);
@@ -294,8 +299,8 @@ inline bool UpdaterBoxMC::box_resize_trial(Scalar Lx,
             if (N != N_backup)
                 {
                 this->m_exec_conf->msg->error()
-                    << "update.boxmc"
-                    << ": Number of particles mismatch when rejecting box resize" << std::endl;
+                    << "update.boxmc" << ": Number of particles mismatch when rejecting box resize"
+                    << std::endl;
                 throw std::runtime_error("Error resizing box");
                 // note, this error should never appear (because particles are not migrated after a
                 // box resize), but is left here as a sanity check
@@ -304,6 +309,9 @@ inline bool UpdaterBoxMC::box_resize_trial(Scalar Lx,
             }
 
         m_pdata->setGlobalBox(curBox);
+
+        // reset origin
+        m_pdata->translateOrigin(-origin_shift);
 
         // we have moved particles, communicate those changes
         m_mc->communicate(false);

@@ -37,6 +37,14 @@ set(_hpmc_sources   module.cc
                     module_convex_polyhedron.cc
                     module_convex_spheropolyhedron.cc
                     ExternalFieldWall.cc
+                    ExternalPotential.cc
+                    ExternalPotentialLinear.cc
+                    PairPotential.cc
+                    PairPotentialLennardJones.cc
+                    PairPotentialExpandedGaussian.cc
+                    PairPotentialStep.cc
+                    PairPotentialUnion.cc
+                    PairPotentialAngularStep.cc
                     ShapeUtils.cc
                     UpdaterBoxMC.cc
                     UpdaterQuickCompress.cc
@@ -48,18 +56,19 @@ set(_hpmc_headers
     ComputeFreeVolumeGPU.h
     ComputeFreeVolume.h
     ComputeSDF.h
-    ExternalFieldComposite.h
     ExternalField.h
     ExternalFieldHarmonic.h
     ExternalFieldWall.h
+    ExternalPotential.h
+    ExternalPotentialLinear.h
     GSDHPMCSchema.h
     GPUHelpers.cuh
     GPUTree.h
     HPMCCounters.h
     HPMCMiscFunctions.h
-    HPMCPrecisionSetup.h
     IntegratorHPMC.h
     IntegratorHPMCMonoGPU.cuh
+    IntegratorHPMCMonoGPUJIT.inc
     IntegratorHPMCMonoGPUMoves.cuh
     IntegratorHPMCMonoGPUTypes.cuh
     IntegratorHPMCMonoGPUDepletants.cuh
@@ -67,14 +76,20 @@ set(_hpmc_headers
     IntegratorHPMCMonoGPUDepletantsAuxilliaryPhase1.cuh
     IntegratorHPMCMonoGPUDepletantsAuxilliaryPhase2.cuh
     IntegratorHPMCMonoGPUDepletantsAuxilliaryTypes.cuh
-    IntegratorHPMCMonoGPUJIT.inc
     IntegratorHPMCMonoGPU.h
+    IntegratorHPMCMonoNEC.h
     IntegratorHPMCMono.h
     MinkowskiMath.h
     modules.h
     Moves.h
     OBB.h
     OBBTree.h
+    PairPotential.h
+    PairPotentialLennardJones.h
+    PairPotentialExpandedGaussian.h
+    PairPotentialStep.h
+    PairPotentialUnion.h
+    PairPotentialAngularStep.h
     ShapeConvexPolygon.h
     ShapeConvexPolyhedron.h
     ShapeEllipsoid.h
@@ -87,15 +102,19 @@ set(_hpmc_headers
     ShapeSpheropolyhedron.h
     ShapeSphinx.h
     ShapeUnion.h
+    ShapeUtils.h
     SphinxOverlap.h
+    UpdaterBoxMC.h
     UpdaterClusters.h
     UpdaterClustersGPU.cuh
+    UpdaterClustersGPU.h
     UpdaterClustersGPUDepletants.cuh
     UpdaterMuVT.h
     UpdaterQuickCompress.h
     UpdaterShape.h
     XenoCollide2D.h
     XenoCollide3D.h
+    XenoSweep3D.h
     )
 
 set(_hpmc_cu_sources IntegratorHPMCMonoGPU.cu
@@ -140,7 +159,7 @@ set(_cuda_sources ${_hpmc_cu_sources})
 set_source_files_properties(${_hpmc_cu_sources} PROPERTIES LANGUAGE ${HOOMD_DEVICE_LANGUAGE})
 endif (ENABLE_HIP)
 
-pybind11_add_module(_hpmc SHARED ${_hpmc_sources} ${_cuda_sources} ${_hpmc_headers} NO_EXTRAS)
+hoomd_add_module(_hpmc SHARED ${_hpmc_sources} ${_cuda_sources} ${_hpmc_headers} NO_EXTRAS)
 # alias into the HOOMD namespace so that plugins and symlinked components both work
 add_library(HOOMD::_hpmc ALIAS _hpmc)
 if (APPLE)
@@ -160,8 +179,6 @@ target_link_libraries(_hpmc PUBLIC _hoomd)
 if (ENABLE_HIP AND HIP_PLATFORM STREQUAL "nvcc")
 target_link_libraries(_hpmc PUBLIC CUDA::cusparse )
 endif()
-
-fix_cudart_rpath(_hpmc)
 
 # install the library
 install(TARGETS _hpmc EXPORT HOOMDTargets
@@ -241,7 +258,7 @@ if (ENABLE_LLVM)
                                  ClangCompiler.h
        )
 
-    pybind11_add_module(_${PACKAGE_NAME} SHARED ${_${PACKAGE_NAME}_sources} ${_${PACKAGE_NAME}_cu_sources} ${_${PACKAGE_NAME}_llvm_sources} NO_EXTRAS)
+    hoomd_add_module(_${PACKAGE_NAME} SHARED ${_${PACKAGE_NAME}_sources} ${_${PACKAGE_NAME}_cu_sources} ${_${PACKAGE_NAME}_llvm_sources} NO_EXTRAS)
     # alias into the HOOMD namespace so that plugins and symlinked components both work
     add_library(HOOMD::_${PACKAGE_NAME} ALIAS _${PACKAGE_NAME})
 
@@ -265,8 +282,6 @@ if (ENABLE_LLVM)
     else()
     set_target_properties(_${PACKAGE_NAME} PROPERTIES INSTALL_RPATH "\$ORIGIN/..;\$ORIGIN")
     endif()
-
-    fix_cudart_rpath(_${PACKAGE_NAME})
 
     # install the library
     install(TARGETS _${PACKAGE_NAME}

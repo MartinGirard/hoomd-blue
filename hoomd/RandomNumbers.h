@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 /*!
@@ -418,7 +418,7 @@ template<typename Real> class SpherePointGenerator
         do
             {
             u = UniformDistribution<Real>(Real(-1.0), Real(1.0))(rng);
-            one_minus_u2 = 1.0f - u * u;
+            one_minus_u2 = Real(1.0) - u * u;
             } while (one_minus_u2 < Real(0.0));
 
         // project onto the sphere surface
@@ -459,11 +459,7 @@ template<typename Real> class GammaDistribution
      * \param alpha
      * \param b
      */
-    DEVICE explicit GammaDistribution(const Real alpha, const Real b) : m_b(b)
-        {
-        m_d = alpha - Real(1. / 3.);
-        m_c = fast::rsqrt(m_d) / Real(3.);
-        }
+    DEVICE explicit GammaDistribution(const Real alpha, const Real b) : m_alpha(alpha), m_b(b) { }
 
     //! Draw a random number from the gamma distribution
     /*!
@@ -479,6 +475,24 @@ template<typename Real> class GammaDistribution
      */
     template<typename RNG> DEVICE inline Real operator()(RNG& rng)
         {
+        if (m_alpha <= 0)
+            {
+#ifndef __HIPCC__
+            throw std::domain_error("alpha must be positive.");
+#else
+            return 0;
+#endif
+            }
+
+        Real alpha = m_alpha;
+        if (m_alpha < Real(1.0))
+            {
+            // when m_alpha < 1, handle specially (see below)
+            alpha += Real(1.0);
+            }
+        Real d = alpha - Real(1. / 3.);
+        Real c = fast::rsqrt(d) / Real(3.);
+
         Real v;
         while (1)
             {
@@ -487,29 +501,34 @@ template<typename Real> class GammaDistribution
             do
                 {
                 x = m_normal(rng);
-                v = 1.0f + m_c * x;
+                v = Real(1.0) + c * x;
                 } while (v <= Real(0.));
             v = v * v * v;
 
             // draw uniform and perform cheap squeeze test first
             const Real x2 = x * x;
             Real u = detail::generate_canonical<Real>(rng);
-            if (u < 1.0f - 0.0331f * x2 * x2)
+            if (u < Real(1.0) - Real(0.0331) * x2 * x2)
                 break;
 
             // otherwise, do expensive log comparison
-            if (fast::log(u) < 0.5f * x2 + m_d * (1.0f - v + fast::log(v)))
+            if (fast::log(u) < Real(0.5) * x2 + d * (Real(1.0) - v + fast::log(v)))
                 break;
             }
 
-        // convert the Gamma(alpha,1) to Gamma(alpha,beta)
-        return m_d * v * m_b;
+        // convert the Gamma(alpha,1) to Gamma(alpha,b)
+        v *= d * m_b;
+        if (m_alpha < Real(1.0))
+            {
+            // finish special case
+            v *= fast::pow(detail::generate_canonical<Real>(rng), Real(1.0) / m_alpha);
+            }
+        return v;
         }
 
     private:
-    Real m_b; //!< Gamma-distribution b-parameter
-    Real m_c; //!< c-parameter for Marsaglia and Tsang method
-    Real m_d; //!< d-parameter for Marasglia and Tsang method
+    Real m_alpha; //!< Gamma distribution alpha parameter
+    Real m_b;     //!< Gamma-distribution b-parameter
 
     NormalDistribution<Real> m_normal; //!< Normal variate generator
     };

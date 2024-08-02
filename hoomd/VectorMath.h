@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 #include "HOOMDMath.h"
@@ -1187,7 +1187,9 @@ template<class Real> struct rotmat3
 
     Multiplication is matrix multiplication, where the vector is represented as a column vector.
 */
-template<class Real> DEVICE inline vec3<Real> operator*(const rotmat3<Real>& A, const vec3<Real>& b)
+template<class Real>
+DEVICE inline __attribute__((always_inline)) vec3<Real> operator*(const rotmat3<Real>& A,
+                                                                  const vec3<Real>& b)
     {
     return vec3<Real>(dot(A.row0, b), dot(A.row1, b), dot(A.row2, b));
     }

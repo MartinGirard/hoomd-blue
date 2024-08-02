@@ -24,8 +24,8 @@ types of particle simulations.
   Instructions for installing **HOOMD-blue** binaries.
 - [Compilation guide](BUILDING.rst):
   Instructions for compiling **HOOMD-blue**.
-- [hoomd-users mailing list](https://groups.google.com/d/forum/hoomd-users):
-  Send messages to the **HOOMD-blue** user community.
+- [HOOMD-blue discussion board](https://github.com/glotzerlab/hoomd-blue/discussions/):
+  Ask the **HOOMD-blue** user community for help.
 - [HOOMD-blue website](https://glotzerlab.engin.umich.edu/hoomd-blue/):
   Additional information and publications.
 - [HOOMD-blue benchmark scripts](https://github.com/glotzerlab/hoomd-benchmarks):
@@ -71,14 +71,15 @@ Molecular dynamics:
 ```python
 import hoomd
 
-cell = hoomd.md.nlist.Cell()
+cell = hoomd.md.nlist.Cell(buffer=0.4)
 lj = hoomd.md.pair.LJ(nlist=cell)
 lj.params[('A', 'A')] = dict(epsilon=1, sigma=1)
 lj.r_cut[('A', 'A')] = 2.5
 
 integrator = hoomd.md.Integrator(dt=0.005)
 integrator.forces.append(lj)
-nvt = hoomd.md.methods.NVT(kT=1.5, filter=hoomd.filter.All(), tau=1.0)
+bussi = hoomd.md.methods.thermostats.Bussi(kT=1.5)
+nvt = hoomd.md.methods.ConstantVolume(filter=hoomd.filter.All(), thermostat=bussi)
 integrator.methods.append(nvt)
 
 gpu = hoomd.device.GPU()

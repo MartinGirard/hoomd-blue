@@ -1,4 +1,4 @@
-# Copyright (c) 2009-2023 The Regents of the University of Michigan.
+# Copyright (c) 2009-2024 The Regents of the University of Michigan.
 # Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 r"""Hard particle Monte Carlo integrators.
@@ -161,11 +161,16 @@ External potentials apply to each particle individually:
                                                                  \mathbf{q}_i)
 
 Potential classes in :doc:`module-hpmc-pair` evaluate
-:math:`U_{\mathrm{pair},ij}`. Assign a class instance to
-`HPMCIntegrator.pair_potential` to apply it during integration. Similarly,
-potential classes in :doc:`module-hpmc-external` evaluate
+:math:`U_{\mathrm{pair},ij}`. HPMC sums all the `Pair <hoomd.hpmc.pair.Pair>`
+potentials in `pair_potentials <HPMCIntegrator.pair_potentials>` and the
+`CPPPotentialBase <hoomd.hpmc.pair.user.CPPPotentialBase>` potential in
+`pair_potential <HPMCIntegrator.pair_potential>` during integration.
+
+Similarly, potential classes in :doc:`module-hpmc-external` evaluate
 :math:`U_{\mathrm{external},i}`. Assign a class instance to
-`HPMCIntegrator.external_potential` to apply it during integration.
+`external_potential <HPMCIntegrator.external_potential>` or add instances to
+`external_potentials <HPMCIntegrator.external_potentials>` to apply during
+integration.
 
 .. rubric:: Shape overlap tests
 
@@ -252,6 +257,17 @@ Set `HPMCIntegrator.depletant_fugacity` to activate the implicit depletant code
 path. This inerts depletant particles during every trial move and modifies the
 acceptance criterion accordingly. See `Glaser 2015
 <https://dx.doi.org/10.1063/1.4935175>`_ for details.
+
+.. deprecated:: 4.4.0
+
+    ``depletant_fugacity > 0`` is deprecated.
+
+.. invisible-code-block: python
+
+    simulation = hoomd.util.make_example_simulation()
+    sphere = hoomd.hpmc.integrate.Sphere()
+    sphere.shape['A'] = dict(diameter=0.0)
+    simulation.operations.integrator = sphere
 """
 
 from hoomd import _hoomd
@@ -264,6 +280,7 @@ from hoomd.operation import Integrator
 from hoomd.logging import log
 import hoomd
 import json
+import warnings
 
 
 class HPMCIntegrator(Integrator):
@@ -300,6 +317,10 @@ class HPMCIntegrator(Integrator):
 
     HPMC integrators use threaded execution on multiple CPU cores only when
     placing implicit depletants (``depletant_fugacity != 0``).
+
+    .. deprecated:: 4.4.0
+
+        ``num_cpu_threads >= 1`` is deprecated. Set ``num_cpu_threads = 1``.
 
     .. rubric:: Mixed precision
 
@@ -346,6 +367,7 @@ class HPMCIntegrator(Integrator):
 
     .. rubric:: Attributes
     """
+    _ext_module = _hpmc
     _remove_for_pickling = Integrator._remove_for_pickling + ('_cpp_cell',)
     _skip_for_equality = Integrator._skip_for_equality | {'_cpp_cell'}
     _cpp_cls = None
@@ -392,24 +414,45 @@ class HPMCIntegrator(Integrator):
             typeparam_inter_matrix
         ])
 
+        self._pair_potentials = hoomd.data.syncedlist.SyncedList(
+            hoomd.hpmc.pair.Pair,
+            hoomd.data.syncedlist._PartialGetAttr('_cpp_obj'))
+
+        self._external_potentials = hoomd.data.syncedlist.SyncedList(
+            hoomd.hpmc.external.External,
+            hoomd.data.syncedlist._PartialGetAttr('_cpp_obj'))
+
     def _attach_hook(self):
         """Initialize the reflected c++ class.
 
         HPMC uses RNGs. Warn the user if they did not set the seed.
         """
+        if any([f != 0 for f in self.depletant_fugacity.values()]):
+            warnings.warn("depletant_fugacity > 0 is deprecated since 4.4.0.",
+                          FutureWarning,
+                          stacklevel=1)
+
+            if (isinstance(self._simulation.device, hoomd.device.CPU)
+                    and self._simulation.device.num_cpu_threads > 1):
+                warnings.warn(
+                    "num_cpu_threads > 1 is deprecated since 4.4.0. "
+                    "Use num_cpu_threads=1.",
+                    FutureWarning,
+                    stacklevel=1)
+
         self._simulation._warn_if_seed_unset()
         sys_def = self._simulation.state._cpp_sys_def
         if (isinstance(self._simulation.device, hoomd.device.GPU)
                 and (self._cpp_cls + 'GPU') in _hpmc.__dict__):
             self._cpp_cell = _hoomd.CellListGPU(sys_def)
-            self._cpp_obj = getattr(_hpmc,
+            self._cpp_obj = getattr(self._ext_module,
                                     self._cpp_cls + 'GPU')(sys_def,
                                                            self._cpp_cell)
         else:
             if isinstance(self._simulation.device, hoomd.device.GPU):
                 self._simulation.device._cpp_msg.warning(
                     "Falling back on CPU. No GPU implementation for shape.\n")
-            self._cpp_obj = getattr(_hpmc, self._cpp_cls)(sys_def)
+            self._cpp_obj = getattr(self._ext_module, self._cpp_cls)(sys_def)
             self._cpp_cell = None
 
         if self._external_potential is not None:
@@ -419,6 +462,13 @@ class HPMCIntegrator(Integrator):
         if self._pair_potential is not None:
             self._pair_potential._attach(self._simulation)
             self._cpp_obj.setPatchEnergy(self._pair_potential._cpp_obj)
+
+        self._pair_potentials._sync(self._simulation,
+                                    self._cpp_obj.pair_potentials)
+
+        self._external_potentials._sync(self._simulation,
+                                        self._cpp_obj.external_potentials)
+
         super()._attach_hook()
 
     def _detach_hook(self):
@@ -426,6 +476,8 @@ class HPMCIntegrator(Integrator):
             self._external_potential._detach()
         if self._pair_potential is not None:
             self._pair_potential._detach()
+        self._pair_potentials._unsync()
+        self._external_potentials._unsync()
 
     # TODO need to validate somewhere that quaternions are normalized
 
@@ -433,6 +485,60 @@ class HPMCIntegrator(Integrator):
         type_shapes = self._cpp_obj.getTypeShapesPy()
         ret = [json.loads(json_string) for json_string in type_shapes]
         return ret
+
+    @property
+    def pair_potentials(self):
+        """list[hoomd.hpmc.pair.Pair]: Pair potentials to apply.
+
+        Defines the pairwise particle interaction energy
+        :math:`U_{\\mathrm{pair},ij}` as the sum over all potentials in the
+        list.
+
+        .. rubric:: Example
+
+        .. invisible-code-block: python
+
+            lennard_jones = hoomd.hpmc.pair.LennardJones()
+            lennard_jones.params[('A', 'A')] = dict(
+                epsilon=1, sigma=1, r_cut=2.5)
+
+        .. code-block:: python
+
+            simulation.operations.integrator.pair_potentials = [lennard_jones]
+        """
+        return self._pair_potentials
+
+    @pair_potentials.setter
+    def pair_potentials(self, value):
+        self._pair_potentials.clear()
+        self._pair_potentials.extend(value)
+
+    @property
+    def external_potentials(self):
+        """list[hoomd.hpmc.external.External]: External potentials to apply.
+
+        Defines the external energy :math:`U_{\\mathrm{external},i}` as the
+        sum over all potentials in the list.
+
+        .. rubric:: Example
+
+        .. invisible-code-block: python
+
+            linear = hoomd.hpmc.external.Linear(
+                plane_origin=(0, 0, 0),
+                plane_normal=(0, 0, -1))
+            linear.alpha['A'] = 1.234
+
+        .. code-block:: python
+
+            simulation.operations.integrator.external_potentials = [linear]
+        """
+        return self._external_potentials
+
+    @external_potentials.setter
+    def external_potentials(self, value):
+        self._external_potentials.clear()
+        self._external_potentials.extend(value)
 
     @log(category='sequence', requires_run=True)
     def map_overlaps(self):
@@ -516,11 +622,26 @@ class HPMCIntegrator(Integrator):
         Defines the pairwise particle interaction energy
         :math:`U_{\mathrm{pair},ij}`. Defaults to `None`. May be set to an
         object from :doc:`module-hpmc-pair`.
+
+        .. deprecated:: 4.5.0
+
+            Use `pair_potentials`.
         """
+        warnings.warn(
+            "pair_potential is deprecated since 4.5.0. "
+            "Use pair_potentials.",
+            FutureWarning,
+            stacklevel=2)
         return self._pair_potential
 
     @pair_potential.setter
     def pair_potential(self, new_potential):
+        warnings.warn(
+            "pair_potential is deprecated since 4.5.0. "
+            "Use pair_potentials.",
+            FutureWarning,
+            stacklevel=4)
+
         if not isinstance(new_potential, hoomd.hpmc.pair.user.CPPPotentialBase):
             raise TypeError(
                 "Pair potentials should be an instance of CPPPotentialBase")
@@ -537,11 +658,25 @@ class HPMCIntegrator(Integrator):
 
         Defines the external energy :math:`U_{\mathrm{external},i}`. Defaults to
         `None`. May be set to an object from :doc:`module-hpmc-external`.
+
+        .. deprecated:: 4.8.0
+
+            Use `external_potentials`.
         """
+        warnings.warn(
+            "external_potential is deprecated since 4.8.0. "
+            "Use external_potentials (when possible).",
+            FutureWarning,
+            stacklevel=2)
         return self._external_potential
 
     @external_potential.setter
     def external_potential(self, new_external_potential):
+        warnings.warn(
+            "external_potential is deprecated since 4.8.0. "
+            "Use external_potentials (when possible).",
+            FutureWarning,
+            stacklevel=4)
         if not isinstance(new_external_potential,
                           hoomd.hpmc.external.field.ExternalField):
             msg = 'External potentials should be an instance of '
@@ -553,6 +688,19 @@ class HPMCIntegrator(Integrator):
             if self._external_potential is not None:
                 self._external_potential._detach()
         self._external_potential = new_external_potential
+
+    @log(requires_run=True)
+    def pair_energy(self):
+        """float: Total potential energy contributed by all pair potentials \
+        :math:`[\\mathrm{energy}]`."""
+        timestep = self._simulation.timestep
+        return self._cpp_obj.computeTotalPairEnergy(timestep)
+
+    @log(requires_run=True)
+    def external_energy(self):
+        """float: Total external energy contributed by all external potentials \
+        :math:`[\\mathrm{energy}]`."""
+        return self._cpp_obj.computeTotalExternalEnergy(False)
 
 
 class Sphere(HPMCIntegrator):
@@ -688,6 +836,7 @@ class ConvexPolygon(HPMCIntegrator):
 
     Attributes:
         shape (`TypeParameter` [``particle type``, `dict`]):
+
             The shape parameters for each particle type. The dictionary has the
             following keys.
 
@@ -706,9 +855,9 @@ class ConvexPolygon(HPMCIntegrator):
               present because `ConvexPolygon` shares data structures with
               `ConvexSpheropolygon` :math:`[\\mathrm{length}]`.
 
-          Warning:
-              HPMC does not check that all vertex requirements are met.
-              Undefined behavior **will result** when they are violated.
+            Warning:
+                HPMC does not check that all vertex requirements are met.
+                Undefined behavior **will result** when they are violated.
 
     """
     _cpp_cls = 'IntegratorHPMCMonoConvexPolygon'
@@ -899,6 +1048,7 @@ class SimplePolygon(HPMCIntegrator):
 
     Attributes:
         shape (`TypeParameter` [``particle type``, `dict`]):
+
             The shape parameters for each particle type. The dictionary has the
             following keys:
 
@@ -1610,8 +1760,8 @@ class SphereUnion(HPMCIntegrator):
         S = \\bigcup_k S_k(\\mathbf{q}_k, \\vec{r}_k)
 
     Each constituent shape in the union has its own shape parameters
-    :math:`S_k`, position :math:`\\vec{r}_k``, and orientation
-    :math:`\\mathbf{q}_k`` (see `shape`).
+    :math:`S_k`, position :math:`\\vec{r}_k`, and orientation
+    :math:`\\mathbf{q}_k` (see `shape`).
 
     Note:
         This shape uses an internal OBB tree for fast collision queries.
@@ -1739,8 +1889,8 @@ class ConvexSpheropolyhedronUnion(HPMCIntegrator):
         S = \\bigcup_k S_k(\\mathbf{q}_k, \\vec{r}_k)
 
     Each constituent shape in the union has its own shape parameters
-    :math:`S_k`, position :math:`\\vec{r}_k``, and orientation
-    :math:`\\mathbf{q}_k`` (see `shape`).
+    :math:`S_k`, position :math:`\\vec{r}_k`, and orientation
+    :math:`\\mathbf{q}_k` (see `shape`).
 
     Note:
         This shape uses an internal OBB tree for fast collision queries.
@@ -1866,8 +2016,8 @@ class FacetedEllipsoidUnion(HPMCIntegrator):
         S = \\bigcup_k S_k(\\mathbf{q}_k, \\vec{r}_k)
 
     Each constituent shape in the union has its own shape parameters
-    :math:`S_k`, position :math:`\\vec{r}_k``, and orientation
-    :math:`\\mathbf{q}_k`` (see `shape`).
+    :math:`S_k`, position :math:`\\vec{r}_k`, and orientation
+    :math:`\\mathbf{q}_k` (see `shape`).
 
     Note:
         This shape uses an internal OBB tree for fast collision queries.

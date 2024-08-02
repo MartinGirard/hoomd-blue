@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 #pragma once
@@ -223,7 +223,7 @@ __launch_bounds__(max_threads)
         if (dim == 3)
             obb_i.lengths.z += r;
         else
-            obb_i.lengths.z = OverlapReal(0.5);
+            obb_i.lengths.z = ShortReal(0.5);
         }
 
     if (master && group == 0)
@@ -440,8 +440,8 @@ __launch_bounds__(max_threads)
                             k -= group_size;
                             }
                         } // end if k < excell_size
-                    }     // end while (s_queue_size < max_queue_size && k < excell_size)
-                }         // end if active
+                    } // end while (s_queue_size < max_queue_size && k < excell_size)
+                } // end if active
 
             // sync to make sure all threads in the block are caught up
             __syncthreads();

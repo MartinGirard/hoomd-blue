@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 /*!
@@ -12,15 +12,14 @@
 namespace hoomd
     {
 /*!
- * \param sysdata MPCD system data
+ * \param sysdef System definition
  */
-mpcd::CellThermoCompute::CellThermoCompute(std::shared_ptr<mpcd::SystemData> sysdata)
-    : Compute(sysdata->getSystemDefinition()), m_mpcd_pdata(sysdata->getParticleData()),
-      m_cl(sysdata->getCellList()), m_needs_net_reduce(true), m_cell_vel(m_exec_conf),
-      m_cell_energy(m_exec_conf), m_ncells_alloc(0)
+mpcd::CellThermoCompute::CellThermoCompute(std::shared_ptr<SystemDefinition> sysdef,
+                                           std::shared_ptr<mpcd::CellList> cl)
+    : Compute(sysdef), m_mpcd_pdata(m_sysdef->getMPCDParticleData()), m_cl(cl),
+      m_needs_net_reduce(true), m_cell_vel(m_exec_conf), m_cell_energy(m_exec_conf),
+      m_ncells_alloc(0)
     {
-    assert(m_mpcd_pdata);
-    assert(m_cl);
     m_exec_conf->msg->notice(5) << "Constructing MPCD CellThermoCompute" << std::endl;
 
     GPUArray<double> net_properties(mpcd::detail::thermo_index::num_quantities, m_exec_conf);
@@ -447,8 +446,8 @@ void mpcd::CellThermoCompute::calcInnerCellProperties()
                     h_cell_energy.data[cur_cell] = make_double3(ke, temp, __int_as_double(np));
                     }
                 } // i
-            }     // j
-        }         // k
+            } // j
+        } // k
     }
 
 void mpcd::CellThermoCompute::computeNetProperties()
@@ -576,15 +575,20 @@ void mpcd::CellThermoCompute::reallocate(unsigned int ncells)
     m_ncells_alloc = ncells;
     }
 
+namespace mpcd
+    {
+namespace detail
+    {
 /*!
- * \param m Python module
+ * \param m Python module to export to
  */
-void mpcd::detail::export_CellThermoCompute(pybind11::module& m)
+void export_CellThermoCompute(pybind11::module& m)
     {
     pybind11::class_<mpcd::CellThermoCompute, Compute, std::shared_ptr<mpcd::CellThermoCompute>>(
         m,
         "CellThermoCompute")
-        .def(pybind11::init<std::shared_ptr<mpcd::SystemData>>());
+        .def(pybind11::init<std::shared_ptr<SystemDefinition>, std::shared_ptr<mpcd::CellList>>());
     }
-
+    } // namespace detail
+    } // namespace mpcd
     } // end namespace hoomd

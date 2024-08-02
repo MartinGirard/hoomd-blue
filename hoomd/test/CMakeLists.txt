@@ -20,10 +20,6 @@ set(TEST_LIST
     random_numbers_test
     )
 
-if (HIP_PLATFORM STREQUAL "nvcc")
-    set(add TEST_LIST test_gpu_polymorph)
-endif()
-
 if (ENABLE_HIP)
 list(APPEND TEST_LIST
      test_warp_tools
@@ -31,8 +27,6 @@ list(APPEND TEST_LIST
 set(SYNC_TEST_LIST
     test_warp_tools)
 endif (ENABLE_HIP)
-
-option(HOOMD_SKIP_LONG_TESTS "Skip long unit tests" on)
 
 if(ENABLE_MPI)
     MACRO(ADD_TO_MPI_TESTS _KEY _VALUE)
@@ -57,12 +51,9 @@ foreach (CUR_TEST ${TEST_LIST} ${MPI_TEST_LIST})
     if(CMAKE_COMPILER_IS_GNUCXX OR "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
         set_source_files_properties(${CUR_TEST}.cc PROPERTIES COMPILE_FLAGS "-Wno-self-assign-overloaded")
     endif()
-    target_include_directories(${CUR_TEST} PRIVATE ${PYTHON_INCLUDE_DIR})
 
     add_dependencies(test_all ${CUR_TEST})
-    target_link_libraries(${CUR_TEST} _hoomd ${PYTHON_LIBRARIES})
-
-    fix_cudart_rpath(${CUR_TEST})
+    target_link_libraries(${CUR_TEST} _hoomd pybind11::embed)
 
 endforeach (CUR_TEST)
 

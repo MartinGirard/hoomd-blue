@@ -1,6 +1,10 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 3.9 FATAL_ERROR)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.15...3.27 FATAL_ERROR)
 # >= 3.8 is required for CUDA language support
 # >= 3.9 is required for MPI::MPI_CXX target
+
+# Search for Python and other libraries in unix-like locations first and frameworks last.
+# This allows FindPython to find virtual environment Pythons before a homebrew or system Pythons.
+set(CMAKE_FIND_FRAMEWORK LAST)
 
 project (HOOMD LANGUAGES C CXX)
 
@@ -14,7 +18,7 @@ add_subdirectory (CMake)
 
 ################################
 ## Version information
-set(HOOMD_VERSION_RAW "3.8.1")
+set(HOOMD_VERSION_RAW "4.8.2")
 string(REGEX MATCH "(.*)\\.(.*)\\.(.*)$" _hoomd_version_match ${HOOMD_VERSION_RAW})
 set(HOOMD_VERSION_MAJOR ${CMAKE_MATCH_1})
 set(HOOMD_VERSION_MINOR ${CMAKE_MATCH_2})
@@ -83,46 +87,49 @@ endif()
 
 #################################
 ## Build options
-option(SINGLE_PRECISION "Use single precision math" OFF)
+set(HOOMD_SHORTREAL_SIZE "32" CACHE STRING "Size of the ShortReal type in bits.")
+SET_PROPERTY(CACHE HOOMD_SHORTREAL_SIZE PROPERTY STRINGS "32" "64")
+set(HOOMD_LONGREAL_SIZE "64" CACHE STRING "Size of the LongReal type in bits.")
+SET_PROPERTY(CACHE HOOMD_LONGREAL_SIZE PROPERTY STRINGS "32" "64")
 OPTION(ENABLE_GPU "True if we are compiling for a GPU target" FALSE)
 SET(ENABLE_HIP ${ENABLE_GPU})
 set(HOOMD_GPU_PLATFORM "CUDA" CACHE STRING "Choose the GPU backend: HIP or CUDA.")
 option(ENABLE_LLVM "Link to the LLVM library for run time code generation" off)
 
-option(ENABLE_HPMC_MIXED_PRECISION "Enable mixed precision computations in HPMC" ON)
-
 # Components
 option(BUILD_MD "Build the md package" on)
-if (NOT SINGLE_PRECISION)
+if (HOOMD_LONGREAL_SIZE STREQUAL "64")
 option(BUILD_HPMC "Build the hpmc package" on)
 else ()
 option(BUILD_HPMC "Build the hpmc package" off)
 endif()
 option(BUILD_METAL "Build the metal package" on)
 
+if (ENABLE_GPU AND HOOMD_GPU_PLATFORM STREQUAL "HIP")
+message("Defaulting BUILD_MPCD=off due to HIP GPU platform.")
+option(BUILD_MPCD "Build the mpcd package" off)
+else()
+option(BUILD_MPCD "Build the mpcd package" ${BUILD_MD})
+endif()
+
 # Optionally use TBB for threading
 option(ENABLE_TBB "Enable support for Threading Building Blocks (TBB)" off)
 
 # Add list of plugins
-set(PLUGINS "example_plugins/pair_plugin;example_plugins/updater_plugin" CACHE STRING "List of plugin directories.")
+set(PLUGINS "example_plugins/pair_plugin;example_plugins/updater_plugin;example_plugins/shape_plugin" CACHE STRING "List of plugin directories.")
 
 # this needs to go before CUDA setup
 include (HOOMDHIPSetup)
 
 # Find CUDA and set it up
 include (HOOMDCUDASetup)
-include (hoomd-macros)
 
 # setup MPI support
 include (HOOMDMPISetup)
 # find the python libraries to link to
 include(HOOMDPythonSetup)
 
-if (NOT ENABLE_HIP OR HIP_PLATFORM STREQUAL "nvcc")
-    option(BUILD_MPCD "Build the mpcd package" on)
-else()
-    option(BUILD_MPCD "Build the mpcd package" off)
-endif()
+include (hoomd-macros)
 
 find_package(Eigen3 3.2 CONFIG REQUIRED)
 if (Eigen3_FOUND)
@@ -157,20 +164,17 @@ endif()
 
 #######################
 ## Get the compile date
-exec_program("date +%Y-%m-%d" OUTPUT_VARIABLE COMPILE_DATE)
+execute_process(COMMAND "date" "+%Y-%m-%d" OUTPUT_VARIABLE COMPILE_DATE OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 ################################
 # set up unit tests
 enable_testing()
 option(BUILD_TESTING "Build unit tests" ON)
 
-################################
-# set up long validation tests
-option(BUILD_VALIDATION "Build validation tests" OFF)
-if (BUILD_TESTING OR BUILD_VALIDATION)
+if (BUILD_TESTING)
      # add test_all to the ALL target
      add_custom_target(test_all ALL)
-endif (BUILD_TESTING OR BUILD_VALIDATION)
+endif (BUILD_TESTING)
 
 ################################
 ## Process subdirectories

@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 #include "TwoStepLangevinBase.h"
@@ -102,8 +102,6 @@ template<class Manifold> class PYBIND11_EXPORT TwoStepRATTLEBD : public TwoStepL
     \param group The group of particles this integration method is to work on
     \param manifold The manifold describing the constraint during the RATTLE integration method
     \param T Temperature set point as a function of time
-    \param use_alpha If true, gamma=alpha*diameter, otherwise use a per-type gamma via setGamma()
-    \param alpha Scale factor to convert diameter to gamma
     \param noiseless_t If set true, there will be no translational noise (random force)
     \param noiseless_r If set true, there will be no rotational noise (random torque)
     \param tolerance Tolerance for the RATTLE iteration algorithm
@@ -150,7 +148,7 @@ template<class Manifold> void TwoStepRATTLEBD<Manifold>::integrateStepOne(uint64
     {
     unsigned int group_size = m_group->getNumMembers();
 
-    const Scalar currentTemp = (*m_T)(timestep);
+    const Scalar currentTemp = m_T->operator()(timestep);
 
     const GlobalArray<Scalar4>& net_force = m_pdata->getNetForce();
     ArrayHandle<Scalar4> h_vel(m_pdata->getVelocities(),
@@ -160,13 +158,10 @@ template<class Manifold> void TwoStepRATTLEBD<Manifold>::integrateStepOne(uint64
                                access_location::host,
                                access_mode::readwrite);
     ArrayHandle<int3> h_image(m_pdata->getImages(), access_location::host, access_mode::readwrite);
-    ArrayHandle<unsigned int> h_rtag(m_pdata->getRTags(), access_location::host, access_mode::read);
+    ArrayHandle<unsigned int> h_tag(m_pdata->getTags(), access_location::host, access_mode::read);
 
     ArrayHandle<Scalar4> h_net_force(net_force, access_location::host, access_mode::read);
     ArrayHandle<Scalar> h_gamma(m_gamma, access_location::host, access_mode::read);
-    ArrayHandle<Scalar> h_diameter(m_pdata->getDiameters(),
-                                   access_location::host,
-                                   access_mode::read);
 
     ArrayHandle<Scalar3> h_gamma_r(m_gamma_r, access_location::host, access_mode::read);
     ArrayHandle<Scalar4> h_orientation(m_pdata->getOrientationArray(),
@@ -202,8 +197,8 @@ template<class Manifold> void TwoStepRATTLEBD<Manifold>::integrateStepOne(uint64
     // v(t+deltaT) = random distribution consistent with T
     for (unsigned int group_idx = 0; group_idx < group_size; group_idx++)
         {
-        unsigned int ptag = m_group->getMemberTag(group_idx);
-        unsigned int j = h_rtag.data[ptag];
+        unsigned int j = m_group->getMemberIndex(group_idx);
+        unsigned int ptag = h_tag.data[j];
 
         // Initialize the RNG
         RandomGenerator rng(hoomd::Seed(RNGIdentifier::TwoStepBD, timestep, seed),
@@ -217,13 +212,9 @@ template<class Manifold> void TwoStepRATTLEBD<Manifold>::integrateStepOne(uint64
                                       // Brownian force stays consistent
 
         Scalar gamma;
-        if (m_use_alpha)
-            gamma = m_alpha * h_diameter.data[j];
-        else
-            {
-            unsigned int type = __scalar_as_int(h_pos.data[j].w);
-            gamma = h_gamma.data[type];
-            }
+        unsigned int type = __scalar_as_int(h_pos.data[j].w);
+        gamma = h_gamma.data[type];
+
         Scalar deltaT_gamma = m_deltaT / gamma;
 
         Scalar3 vec_rand;
@@ -340,11 +331,20 @@ template<class Manifold> void TwoStepRATTLEBD<Manifold>::integrateStepOne(uint64
                 bf_torque.z = NormalDistribution<Scalar>(sigma_r.z)(rng);
 
                 if (x_zero)
+                    {
                     bf_torque.x = 0;
+                    t.x = 0;
+                    }
                 if (y_zero)
+                    {
                     bf_torque.y = 0;
+                    t.y = 0;
+                    }
                 if (z_zero)
+                    {
                     bf_torque.z = 0;
+                    t.z = 0;
+                    }
 
                 // use the d_invamping by gamma_r and rotate back to lab frame
                 // Notes For the Future: take special care when have anisotropic gamma_r
@@ -401,19 +401,16 @@ template<class Manifold> void TwoStepRATTLEBD<Manifold>::includeRATTLEForce(uint
     {
     unsigned int group_size = m_group->getNumMembers();
 
-    const Scalar currentTemp = (*m_T)(timestep);
+    const Scalar currentTemp = m_T->operator()(timestep);
 
     const GlobalArray<Scalar4>& net_force = m_pdata->getNetForce();
     const GlobalArray<Scalar>& net_virial = m_pdata->getNetVirial();
     ArrayHandle<Scalar4> h_pos(m_pdata->getPositions(), access_location::host, access_mode::read);
-    ArrayHandle<unsigned int> h_rtag(m_pdata->getRTags(), access_location::host, access_mode::read);
+    ArrayHandle<unsigned int> h_tag(m_pdata->getTags(), access_location::host, access_mode::read);
 
     ArrayHandle<Scalar4> h_net_force(net_force, access_location::host, access_mode::readwrite);
     ArrayHandle<Scalar> h_net_virial(net_virial, access_location::host, access_mode::readwrite);
     ArrayHandle<Scalar> h_gamma(m_gamma, access_location::host, access_mode::read);
-    ArrayHandle<Scalar> h_diameter(m_pdata->getDiameters(),
-                                   access_location::host,
-                                   access_mode::read);
 
     size_t net_virial_pitch = net_virial.getPitch();
 
@@ -425,21 +422,16 @@ template<class Manifold> void TwoStepRATTLEBD<Manifold>::includeRATTLEForce(uint
     // v(t+deltaT) = random distribution consistent with T
     for (unsigned int group_idx = 0; group_idx < group_size; group_idx++)
         {
-        unsigned int ptag = m_group->getMemberTag(group_idx);
-        unsigned int j = h_rtag.data[ptag];
+        unsigned int j = m_group->getMemberIndex(group_idx);
+        unsigned int ptag = h_tag.data[j];
 
         // Initialize the RNG
         RandomGenerator rng_b(hoomd::Seed(RNGIdentifier::TwoStepBD, timestep, seed),
                               hoomd::Counter(ptag, 2));
 
         Scalar gamma;
-        if (m_use_alpha)
-            gamma = m_alpha * h_diameter.data[j];
-        else
-            {
-            unsigned int type = __scalar_as_int(h_pos.data[j].w);
-            gamma = h_gamma.data[type];
-            }
+        unsigned int type = __scalar_as_int(h_pos.data[j].w);
+        gamma = h_gamma.data[type];
         Scalar deltaT_gamma = m_deltaT / gamma;
 
         Scalar3 next_pos;

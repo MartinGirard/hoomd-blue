@@ -1,10 +1,14 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 #include "IntegratorHPMC.h"
 
 #include "hoomd/VectorMath.h"
 #include <sstream>
+
+#include <pybind11/stl_bind.h>
+PYBIND11_MAKE_OPAQUE(std::vector<std::shared_ptr<hoomd::hpmc::PairPotential>>);
+PYBIND11_MAKE_OPAQUE(std::vector<std::shared_ptr<hoomd::hpmc::ExternalPotential>>);
 
 using namespace std;
 
@@ -153,6 +157,12 @@ bool IntegratorHPMC::attemptBoxResize(uint64_t timestep, const BoxDim& new_box)
 
     m_pdata->setGlobalBox(new_box);
 
+    // scale the origin
+    Scalar3 old_origin = m_pdata->getOrigin();
+    Scalar3 fractional_old_origin = curBox.makeFraction(old_origin);
+    Scalar3 new_origin = new_box.makeCoordinates(fractional_old_origin);
+    m_pdata->translateOrigin(new_origin - old_origin);
+
     // we have moved particles, communicate those changes
     this->communicate(false);
 
@@ -231,6 +241,11 @@ namespace detail
     {
 void export_IntegratorHPMC(pybind11::module& m)
     {
+    pybind11::class_<hpmc::PatchEnergy, Autotuned, std::shared_ptr<hpmc::PatchEnergy>>(
+        m,
+        "PatchEnergy")
+        .def(pybind11::init<std::shared_ptr<SystemDefinition>>());
+
     pybind11::class_<IntegratorHPMC, Integrator, std::shared_ptr<IntegratorHPMC>>(m,
                                                                                   "IntegratorHPMC")
         .def(pybind11::init<std::shared_ptr<SystemDefinition>>())
@@ -251,13 +266,21 @@ void export_IntegratorHPMC(pybind11::module& m)
         .def_property("nselect", &IntegratorHPMC::getNSelect, &IntegratorHPMC::setNSelect)
         .def_property("translation_move_probability",
                       &IntegratorHPMC::getTranslationMoveProbability,
-                      &IntegratorHPMC::setTranslationMoveProbability);
+                      &IntegratorHPMC::setTranslationMoveProbability)
+        .def_property_readonly("pair_potentials", &IntegratorHPMC::getPairPotentials)
+        .def("computeTotalPairEnergy", &IntegratorHPMC::computeTotalPairEnergy)
+        .def_property_readonly("external_potentials", &IntegratorHPMC::getExternalPotentials)
+        .def("computeTotalExternalEnergy", &IntegratorHPMC::computeTotalExternalEnergy);
 
     pybind11::class_<hpmc_counters_t>(m, "hpmc_counters_t")
         .def_readonly("overlap_checks", &hpmc_counters_t::overlap_checks)
         .def_readonly("overlap_errors", &hpmc_counters_t::overlap_err_count)
         .def_property_readonly("translate", &hpmc_counters_t::getTranslateCounts)
         .def_property_readonly("rotate", &hpmc_counters_t::getRotateCounts);
+
+    pybind11::bind_vector<std::vector<std::shared_ptr<ExternalPotential>>>(m,
+                                                                           "ExternalPotentialList");
+    pybind11::bind_vector<std::vector<std::shared_ptr<PairPotential>>>(m, "PairPotentialList");
     }
 
     } // end namespace detail

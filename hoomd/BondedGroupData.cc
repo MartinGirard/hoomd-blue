@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 /*! \file BondedGroupData.h
@@ -27,7 +27,6 @@ char name_triangle_data[] = "triangle";
 char name_dihedral_data[] = "dihedral";
 char name_improper_data[] = "improper";
 char name_meshbond_data[] = "meshbond";
-char name_meshtriangle_data[] = "meshtriangle";
 char name_constraint_data[] = "constraint";
 char name_pair_data[] = "pair";
 
@@ -454,8 +453,8 @@ unsigned int BondedGroupData<group_size, Group, name, has_type_mapping>::getNthT
     if (n >= getNGlobal())
         {
         std::ostringstream s;
-        s << name << " index " << n << " out of bounds!"
-          << "The number of " << name << "s is " << getNGlobal();
+        s << name << " index " << n << " out of bounds!" << "The number of " << name << "s is "
+          << getNGlobal();
         throw std::runtime_error(s.str());
         }
 
@@ -1419,7 +1418,12 @@ pybind11::object BondedGroupData<group_size, Group, name, has_type_mapping>::Sna
     assert(has_type_mapping);
     auto self_cpp
         = self.cast<BondedGroupData<group_size, Group, name, has_type_mapping>::Snapshot*>();
-    return pybind11::array(self_cpp->type_id.size(), &self_cpp->type_id[0], self);
+
+    if (self_cpp->type_id.size() == 0)
+        {
+        return pybind11::array(pybind11::dtype::of<unsigned int>(), 0, nullptr);
+        }
+    return pybind11::array(self_cpp->type_id.size(), self_cpp->type_id.data(), self);
     }
 
 /*! \returns a numpy array that wraps the value data element.
@@ -1433,7 +1437,12 @@ pybind11::object BondedGroupData<group_size, Group, name, has_type_mapping>::Sna
     assert(!has_type_mapping);
     auto self_cpp
         = self.cast<BondedGroupData<group_size, Group, name, has_type_mapping>::Snapshot*>();
-    return pybind11::array(self_cpp->val.size(), &self_cpp->val[0], self);
+
+    if (self_cpp->val.size() == 0)
+        {
+        return pybind11::array(pybind11::dtype::of<Scalar>(), 0, nullptr);
+        }
+    return pybind11::array(self_cpp->val.size(), self_cpp->val.data(), self);
     }
 
 /*! \returns a numpy array that wraps the groups data element.
@@ -1450,7 +1459,12 @@ BondedGroupData<group_size, Group, name, has_type_mapping>::Snapshot::getBondedT
     std::vector<size_t> dims(2);
     dims[0] = self_cpp->groups.size();
     dims[1] = group_size;
-    return pybind11::array(dims, (unsigned int*)&self_cpp->groups[0], self);
+
+    if (dims[0] == 0)
+        {
+        return pybind11::array(pybind11::dtype::of<unsigned int>(), dims, nullptr);
+        }
+    return pybind11::array(dims, (unsigned int*)self_cpp->groups.data(), self);
     }
 
 /*! \returns A python list of type names
@@ -1483,7 +1497,6 @@ template class PYBIND11_EXPORT BondedGroupData<4, MeshBond, name_meshbond_data>;
 template class PYBIND11_EXPORT BondedGroupData<3, Angle, name_angle_data>;
 template class PYBIND11_EXPORT BondedGroupData<3, Angle, name_triangle_data>;
 template class PYBIND11_EXPORT BondedGroupData<4, Dihedral, name_dihedral_data>;
-template class PYBIND11_EXPORT BondedGroupData<6, MeshTriangle, name_meshtriangle_data>;
 template class PYBIND11_EXPORT BondedGroupData<4, Dihedral, name_improper_data>;
 template class PYBIND11_EXPORT BondedGroupData<2, Constraint, name_constraint_data, false>;
 template class PYBIND11_EXPORT BondedGroupData<2, Bond, name_pair_data>;

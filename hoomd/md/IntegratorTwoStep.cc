@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 #include "IntegratorTwoStep.h"
@@ -17,7 +17,7 @@ namespace hoomd
 namespace md
     {
 IntegratorTwoStep::IntegratorTwoStep(std::shared_ptr<SystemDefinition> sysdef, Scalar deltaT)
-    : Integrator(sysdef, deltaT), m_prepared(false), m_gave_warning(false)
+    : Integrator(sysdef, deltaT), m_prepared(false)
     {
     m_exec_conf->msg->notice(5) << "Constructing IntegratorTwoStep" << endl;
 
@@ -51,13 +51,6 @@ IntegratorTwoStep::~IntegratorTwoStep()
 void IntegratorTwoStep::update(uint64_t timestep)
     {
     Integrator::update(timestep);
-
-    // issue a warning if no integration methods are set
-    if (!m_gave_warning && m_methods.size() == 0)
-        {
-        m_exec_conf->msg->warning() << "MD Integrator has no integration methods." << endl;
-        m_gave_warning = true;
-        }
 
     // ensure that prepRun() has been called
     assert(m_prepared);
@@ -160,15 +153,29 @@ void IntegratorTwoStep::setDeltaT(Scalar deltaT)
 */
 Scalar IntegratorTwoStep::getTranslationalDOF(std::shared_ptr<ParticleGroup> group)
     {
+    Scalar periodic_dof_removed = 0;
+
+    unsigned int N_filter = group->getNumMembersGlobal();
+    unsigned int N_particles = m_pdata->getNGlobal();
+
+    // When using rigid bodies, adjust the number of particles to the number of rigid centers and
+    // free particles. The constituent particles are in the system, but not part of the equations
+    // of motion.
+    if (m_rigid_bodies)
+        {
+        m_rigid_bodies->validateRigidBodies();
+        N_particles
+            = m_rigid_bodies->getNMoleculesGlobal() + m_rigid_bodies->getNFreeParticlesGlobal();
+        N_filter = group->getNCentralAndFreeGlobal();
+        }
+
     // proportionately remove n_dimensions DOF when there is only one momentum conserving
     // integration method
-    Scalar periodic_dof_removed = 0;
-    if (group->getNumMembersGlobal() == m_pdata->getNGlobal() && m_methods.size() == 1
-        && m_methods[0]->isMomentumConserving())
+    if (m_methods.size() == 1 && m_methods[0]->isMomentumConserving()
+        && m_methods[0]->getGroup()->getNumMembersGlobal() == N_particles)
         {
         periodic_dof_removed
-            = Scalar(m_sysdef->getNDimensions())
-              * (Scalar(group->getNumMembersGlobal()) / Scalar(m_pdata->getNGlobal()));
+            = Scalar(m_sysdef->getNDimensions()) * (Scalar(N_filter) / Scalar(N_particles));
         }
 
     // loop through all methods and add up the number of DOF They apply to the group
@@ -394,6 +401,33 @@ bool IntegratorTwoStep::areForcesAnisotropic()
     return is_anisotropic;
     }
 
+void IntegratorTwoStep::validateGroups()
+    {
+    // Check that methods have valid groups.
+    size_t group_size = 0;
+    for (auto& method : m_methods)
+        {
+        method->validateGroup();
+        group_size += method->getGroup()->getNumMembersGlobal();
+        }
+
+    // Check that methods have non-overlapping groups.
+    if (m_methods.size() <= 1)
+        {
+        return;
+        }
+    auto group_union
+        = ParticleGroup::groupUnion(m_methods[0]->getGroup(), m_methods[1]->getGroup());
+    for (size_t i = 2; i < m_methods.size(); i++)
+        {
+        group_union = ParticleGroup::groupUnion(m_methods[i]->getGroup(), group_union);
+        }
+    if (group_size != group_union->getNumMembersGlobal())
+        {
+        throw std::runtime_error("Error: the provided groups overlap.");
+        }
+    }
+
 namespace detail
     {
 void export_IntegratorTwoStep(pybind11::module& m)
@@ -413,7 +447,8 @@ void export_IntegratorTwoStep(pybind11::module& m)
                       &IntegratorTwoStep::setIntegrateRotationalDOF)
         .def_property("half_step_hook",
                       &IntegratorTwoStep::getHalfStepHook,
-                      &IntegratorTwoStep::setHalfStepHook);
+                      &IntegratorTwoStep::setHalfStepHook)
+        .def("validate_groups", &IntegratorTwoStep::validateGroups);
     }
 
     } // end namespace detail

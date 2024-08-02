@@ -5,19 +5,12 @@ ci:
 
 exclude: (?x)(
         ^hoomd/extern/|
-        ^hoomd/sphinx-doc/tutorial/
+        ^sphinx-doc/tutorial/
         )
 
 repos:
 - repo: local
   hooks:
-  - id: make_workflows
-    name: make_workflows
-    language: python
-    entry: python3 .github/workflows/make_workflows.py
-    pass_filenames: false
-    always_run: true
-    additional_dependencies: [jinja2==3.0.1, pyyaml==5.4.1]
   - id: check-maintainer
     name: Check for maintainer comments
     description: 'Enforce that `maintainer` comments are removed.'
@@ -25,7 +18,7 @@ repos:
     language: pygrep
     types_or: [python, c, c++, cuda, inc]
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: 'v4.4.0'
+  rev: 'v4.6.0'
   hooks:
   - id: end-of-file-fixer
     exclude_types: [svg]
@@ -35,15 +28,18 @@ repos:
   - id: check-yaml
     exclude: (?:^.github/workflows/templates) # templates are not properly formatted yaml
   - id: check-case-conflict
-  - id: fix-encoding-pragma
-    args:
-    - --remove
   - id: mixed-line-ending
 - repo: https://github.com/glotzerlab/fix-license-header
-  rev: 43eb3ff2d02cba5e572f86af5c15337823fb2c66
+  rev: v0.3.2
   hooks:
   - id: fix-license-header
     name: Fix license headers (Python)
+    exclude: |
+      (?x)(
+          ^hoomd/extern/|
+          ^sphinx-doc/tutorial/|
+          ^sphinx-doc/howto/
+          )
     types_or: [python]
     args:
     - --license-file=LICENSE
@@ -65,21 +61,21 @@ repos:
     - --keep-after=.. include
     - --comment-prefix=..
 - repo: https://github.com/kynan/nbstripout
-  rev: 0.6.1
+  rev: 0.7.1
   hooks:
     - id: nbstripout
 - repo: https://github.com/google/yapf
-  rev: 'v0.32.0'
+  rev: 'v0.40.2'
   hooks:
   - id: yapf
 - repo: https://github.com/PyCQA/flake8
-  rev: '6.0.0'
+  rev: '7.1.0'
   hooks:
   - id: flake8
     additional_dependencies:
     - pep8-naming==0.13.3
-    - pydocstyle==6.2.3
-    - flake8-docstrings==1.6.0
+    - pydocstyle==6.3.0
+    - flake8-docstrings==1.7.0
     - flake8-rst-docstrings==0.3.0
     # Exclude components not yet ported to hoomd v3
     # TODO: Remove these exclusions as components are ported
@@ -87,11 +83,10 @@ repos:
     exclude: |
       (?x)(
         ^hoomd/extern/|
-        ^hoomd/mpcd/|
         ^hoomd/metal/
       )
 - repo: https://github.com/pre-commit/mirrors-clang-format
-  rev: v15.0.6
+  rev: v18.1.8
   hooks:
   - id: clang-format
     types_or: [c, c++, cuda, inc]

@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 /*! \file Communicator.h
@@ -384,13 +384,13 @@ class PYBIND11_EXPORT Communicator
         };
 
     //@}
+    virtual void updateMeshDefinition();
 
-    //! Helper function to initialize adjacency arrays
     void addMeshDefinition(std::shared_ptr<MeshDefinition> meshdef);
 
     protected:
     //! Helper class to perform the communication tasks related to bonded groups
-    template<class group_data, bool inMesh = false> class GroupCommunicator
+    template<class group_data> class GroupCommunicator
         {
         public:
         typedef struct rank_element<typename group_data::ranks_t> rank_element_t;
@@ -706,13 +706,13 @@ class PYBIND11_EXPORT Communicator
     friend class GroupCommunicator<PairData>;
 
     /* Communication of mesh bonded groups */
-    GroupCommunicator<MeshBondData, true> m_meshbond_comm; //!< Communication helper for mesh bonds
-    friend class GroupCommunicator<MeshBondData, true>;
+    GroupCommunicator<MeshBondData> m_meshbond_comm; //!< Communication helper for mesh bonds
+    friend class GroupCommunicator<MeshBondData>;
 
     /* Communication of mesh triangle groups */
-    GroupCommunicator<MeshTriangleData, true>
+    GroupCommunicator<TriangleData>
         m_meshtriangle_comm; //!< Communication helper for mesh triangles
-    friend class GroupCommunicator<MeshTriangleData, true>;
+    friend class GroupCommunicator<TriangleData>;
 
     //! Helper function to initialize adjacency arrays
     void initializeNeighborArrays();
@@ -732,6 +732,6 @@ void export_Communicator(pybind11::module& m);
 
     } // end namespace detail
 
-    }  // end namespace hoomd
+    } // end namespace hoomd
 #endif // __COMMUNICATOR_H__
 #endif // ENABLE_MPI

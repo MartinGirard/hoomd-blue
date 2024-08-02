@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 /*!
@@ -34,8 +34,7 @@ class PYBIND11_EXPORT CellList : public Compute
     {
     public:
     //! Constructor
-    CellList(std::shared_ptr<SystemDefinition> sysdef,
-             std::shared_ptr<mpcd::ParticleData> mpcd_pdata);
+    CellList(std::shared_ptr<SystemDefinition> sysdef, Scalar cell_size, bool shift);
 
     //! Destructor
     virtual ~CellList();
@@ -171,10 +170,35 @@ class PYBIND11_EXPORT CellList : public Compute
     bool isCommunicating(mpcd::detail::face dir);
 #endif // ENABLE_MPI
 
+    //! Get whether grid shifting is enabled
+    bool isGridShifting() const
+        {
+        return m_enable_grid_shift;
+        }
+
+    //! Toggle the grid shifting on or off
+    /*!
+     * \param enable_grid_shift Flag to enable grid shifting if true
+     */
+    void enableGridShifting(bool enable_grid_shift)
+        {
+        m_enable_grid_shift = enable_grid_shift;
+        if (!m_enable_grid_shift)
+            {
+            setGridShift(make_scalar3(0, 0, 0));
+            }
+        }
+
     //! Get the maximum permitted grid shift
     const Scalar getMaxGridShift() const
         {
         return m_max_grid_shift;
+        }
+
+    // Get the grid shift vector
+    const Scalar3& getGridShift() const
+        {
+        return m_grid_shift;
         }
 
     //! Set the grid shift vector
@@ -193,11 +217,8 @@ class PYBIND11_EXPORT CellList : public Compute
         m_grid_shift = shift;
         }
 
-    // Get the grid shift vector
-    const Scalar3& getGridShift() const
-        {
-        return m_grid_shift;
-        }
+    //! Generates the random grid shift vector
+    void drawGridShift(uint64_t timestep);
 
     //! Calculate current cell occupancy statistics
     virtual void getCellStatistics() const;
@@ -211,13 +232,11 @@ class PYBIND11_EXPORT CellList : public Compute
     //! Sets a group of particles that is coupled to the MPCD solvent through the collision step
     void setEmbeddedGroup(std::shared_ptr<ParticleGroup> embed_group)
         {
-        m_embed_group = embed_group;
-        }
-
-    //! Removes all embedded particles from collision coupling
-    void removeEmbeddedGroup()
-        {
-        m_embed_group = std::shared_ptr<ParticleGroup>();
+        if (embed_group != m_embed_group)
+            {
+            m_embed_group = embed_group;
+            m_force_compute = true;
+            }
         }
 
     //! Gets the cell id array for the embedded particles
@@ -240,8 +259,9 @@ class PYBIND11_EXPORT CellList : public Compute
     std::shared_ptr<mpcd::ParticleData> m_mpcd_pdata; //!< MPCD particle data
     std::shared_ptr<ParticleGroup> m_embed_group;     //!< Embedded particles
 
-    Scalar3 m_grid_shift;    //!< Amount to shift particle positions when computing cell list
-    Scalar m_max_grid_shift; //!< Maximum amount grid can be shifted in any direction
+    bool m_enable_grid_shift; //!< Flag to enable grid shifting
+    Scalar3 m_grid_shift;     //!< Amount to shift particle positions when computing cell list
+    Scalar m_max_grid_shift;  //!< Maximum amount grid can be shifted in any direction
 
     //! Allocates internal data arrays
     virtual void reallocate();
@@ -264,9 +284,6 @@ class PYBIND11_EXPORT CellList : public Compute
     unsigned int m_num_extra;               //!< Number of extra cells to communicate over
     std::array<unsigned int, 6> m_num_comm; //!< Number of cells to communicate on each face
     BoxDim m_cover_box;                     //!< Box covered by the cell list
-
-    /// The systems's communicator.
-    std::shared_ptr<Communicator> m_comm;
 
     //! Determine if embedded particles require migration
     virtual bool needsEmbedMigrate(uint64_t timestep);
@@ -325,13 +342,6 @@ class PYBIND11_EXPORT CellList : public Compute
     void checkDomainBoundaries();
 #endif // ENABLE_MPI
     };
-
-namespace detail
-    {
-//! Export the CellList class to python
-void export_CellList(pybind11::module& m);
-    } // end namespace detail
-
-    }  // end namespace mpcd
-    }  // end namespace hoomd
+    } // end namespace mpcd
+    } // end namespace hoomd
 #endif // MPCD_CELL_LIST_H_

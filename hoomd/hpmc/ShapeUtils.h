@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 #ifndef _SHAPE_UTILS_H
@@ -70,7 +70,7 @@ class MassPropertiesBase
     Scalar m_surface_area;
     vec3<Scalar> m_center_of_mass;
     std::vector<Scalar> m_inertia; // xx, yy, zz, xy, yz, xz
-    };                             // end class MassPropertiesBase
+    }; // end class MassPropertiesBase
 
 template<class Shape> class MassProperties : public MassPropertiesBase
     {
@@ -106,13 +106,13 @@ template<> class MassProperties<ShapeConvexPolyhedron> : public MassPropertiesBa
     std::pair<std::vector<vec3<Scalar>>, std::vector<std::vector<unsigned int>>>
     getQuickHullVertsAndFaces(const typename ShapeConvexPolyhedron::param_type& param)
         {
-        std::vector<quickhull::Vector3<OverlapReal>> verts;
+        std::vector<quickhull::Vector3<ShortReal>> verts;
         for (unsigned int i = 0; i < param.N; i++)
             {
-            quickhull::Vector3<OverlapReal> vert(param.x[i], param.y[i], param.z[i]);
+            quickhull::Vector3<ShortReal> vert(param.x[i], param.y[i], param.z[i]);
             verts.push_back(vert);
             }
-        quickhull::QuickHull<OverlapReal> qh;
+        quickhull::QuickHull<ShortReal> qh;
         auto hull = qh.getConvexHull(&verts[0].x, verts.size(), true, true, 0.0000001f);
         auto verts2 = hull.getVertexBuffer();
         std::vector<vec3<Scalar>> v;
@@ -326,6 +326,6 @@ void export_MassPropertiesBase(pybind11::module& m);
 
 template<class Shape> void export_MassProperties(pybind11::module& m, std::string name);
 
-    }  // end namespace hpmc
-    }  // namespace hoomd
+    } // end namespace hpmc
+    } // namespace hoomd
 #endif // end inclusion guard

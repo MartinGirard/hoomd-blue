@@ -1,4 +1,4 @@
-# Copyright (c) 2009-2023 The Regents of the University of Michigan.
+# Copyright (c) 2009-2024 The Regents of the University of Michigan.
 # Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 """HOOMD-blue python package.
@@ -29,10 +29,23 @@ methods, and variables in the API.
 
 See Also:
     Tutorial: :doc:`tutorial/00-Introducing-HOOMD-blue/00-index`
+
+.. rubric:: Signal handling
+
+On import, `hoomd` installs a ``SIGTERM`` signal handler that calls `sys.exit`
+so that open gsd files have a chance to flush write buffers
+(`hoomd.write.GSD.flush`) when a user's process is terminated. Use
+`signal.signal` to adjust this behavior as needed.
 """
 import sys
 import pathlib
 import os
+import signal
+
+# Work around /usr/lib64/slurm/auth_munge.so: undefined symbol: slurm_conf
+# error on Purdue Anvil.
+if os.environ.get('RCAC_CLUSTER') == 'anvil':
+    sys.setdlopenflags(os.RTLD_NOW | os.RTLD_GLOBAL)
 
 if ((pathlib.Path(__file__).parent / 'CMakeLists.txt').exists()
         and 'SPHINX' not in os.environ):
@@ -51,8 +64,8 @@ outside the hoomd source directory, execute `python3 -m pytest --pyargs hoomd`.
 
 from hoomd import version
 from hoomd import trigger
-from hoomd import variant
 from hoomd.box import Box, box_like
+from hoomd import variant
 from hoomd import data
 from hoomd import filter
 from hoomd import device
@@ -73,8 +86,8 @@ if version.hpmc_built:
     from hoomd import hpmc
 # if version.metal_built:
 #     from hoomd import metal
-# if version.mpcd_built:
-#     from hoomd import mpcd
+if version.mpcd_built:
+    from hoomd import mpcd
 
 from hoomd.simulation import Simulation
 from hoomd.state import State
@@ -86,9 +99,19 @@ _default_excepthook = sys.excepthook
 
 def _hoomd_sys_excepthook(type, value, traceback):
     """Override Python's excepthook to abort MPI runs."""
+    write.gsd._flush_open_gsd_writers()
     _default_excepthook(type, value, traceback)
     sys.stderr.flush()
     _hoomd.abort_mpi(communicator._current_communicator.cpp_mpi_conf, 1)
 
 
 sys.excepthook = _hoomd_sys_excepthook
+
+# Install a SIGTERM handler that gracefully exits, allowing open files to flush
+# buffered writes and close. Catch ValueError and pass as there is no way to
+# determine if this is the main interpreter running the main thread prior to
+# the call.
+try:
+    signal.signal(signal.SIGTERM, lambda n, f: sys.exit(1))
+except ValueError:
+    pass

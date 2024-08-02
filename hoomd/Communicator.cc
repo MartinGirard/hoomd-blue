@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 /*! \file Communicator.cc
@@ -20,25 +20,23 @@ using namespace std;
 
 namespace hoomd
     {
-template<class group_data, bool inMesh>
-Communicator::GroupCommunicator<group_data, inMesh>::GroupCommunicator(
-    Communicator& comm,
-    std::shared_ptr<group_data> gdata)
+template<class group_data>
+Communicator::GroupCommunicator<group_data>::GroupCommunicator(Communicator& comm,
+                                                               std::shared_ptr<group_data> gdata)
     : m_comm(comm), m_exec_conf(comm.m_exec_conf), m_gdata(gdata)
     {
     // the size of the bit field must be larger or equal the group size
     assert(sizeof(unsigned int) * 8 >= group_data::size);
     }
 
-template<class group_data, bool inMesh>
-Communicator::GroupCommunicator<group_data, inMesh>::GroupCommunicator(Communicator& comm)
+template<class group_data>
+Communicator::GroupCommunicator<group_data>::GroupCommunicator(Communicator& comm)
     : m_comm(comm), m_exec_conf(comm.m_exec_conf), m_gdata(NULL)
     {
     }
 
-template<class group_data, bool inMesh>
-void Communicator::GroupCommunicator<group_data, inMesh>::setGroupData(
-    std::shared_ptr<group_data> gdata)
+template<class group_data>
+void Communicator::GroupCommunicator<group_data>::setGroupData(std::shared_ptr<group_data> gdata)
     {
     m_gdata = gdata;
 
@@ -46,18 +44,13 @@ void Communicator::GroupCommunicator<group_data, inMesh>::setGroupData(
     assert(sizeof(unsigned int) * 8 >= group_data::size);
     }
 
-template<class group_data, bool inMesh>
-void Communicator::GroupCommunicator<group_data, inMesh>::migrateGroups(bool incomplete,
-                                                                        bool local_multiple)
+template<class group_data>
+void Communicator::GroupCommunicator<group_data>::migrateGroups(bool incomplete,
+                                                                bool local_multiple)
     {
     if (m_gdata->getNGlobal())
         {
         unsigned int group_size = group_data::size;
-        if (inMesh)
-            {
-            group_size /= 2;
-            }
-
             {
             // wipe out reverse-lookup tag -> idx for old ghost groups
             ArrayHandle<unsigned int> h_group_tag(m_gdata->getTags(),
@@ -226,7 +219,7 @@ void Communicator::GroupCommunicator<group_data, inMesh>::migrateGroups(bool inc
                             }
                     }
                 } // end loop over groups
-            }     // end ArrayHandle scope
+            } // end ArrayHandle scope
 
         // clear send buffer
         m_ranks_sendbuf.clear();
@@ -261,9 +254,9 @@ void Communicator::GroupCommunicator<group_data, inMesh>::migrateGroups(bool inc
         /*
          * communicate rank information (phase 1)
          */
-        unsigned int n_send_groups[m_comm.m_n_unique_neigh];
-        unsigned int n_recv_groups[m_comm.m_n_unique_neigh];
-        unsigned int offs[m_comm.m_n_unique_neigh];
+        std::vector<unsigned int> n_send_groups(m_comm.m_n_unique_neigh);
+        std::vector<unsigned int> n_recv_groups(m_comm.m_n_unique_neigh);
+        std::vector<unsigned int> offs(m_comm.m_n_unique_neigh);
         unsigned int n_recv_tot = 0;
 
             {
@@ -279,8 +272,8 @@ void Communicator::GroupCommunicator<group_data, inMesh>::migrateGroups(bool inc
             for (unsigned int ineigh = 0; ineigh < m_comm.m_n_unique_neigh; ineigh++)
                 n_send_groups[ineigh] = h_end.data[ineigh] - h_begin.data[ineigh];
 
-            MPI_Request req[2 * m_comm.m_n_unique_neigh];
-            MPI_Status stat[2 * m_comm.m_n_unique_neigh];
+            std::vector<MPI_Request> req(2 * m_comm.m_n_unique_neigh);
+            std::vector<MPI_Status> stat(2 * m_comm.m_n_unique_neigh);
 
             unsigned int nreq = 0;
 
@@ -306,7 +299,7 @@ void Communicator::GroupCommunicator<group_data, inMesh>::migrateGroups(bool inc
                           &req[nreq++]);
                 } // end neighbor loop
 
-            MPI_Waitall(nreq, req, stat);
+            MPI_Waitall(nreq, req.data(), stat.data());
 
             // sum up receive counts
             for (unsigned int ineigh = 0; ineigh < m_comm.m_n_unique_neigh; ineigh++)
@@ -608,8 +601,8 @@ void Communicator::GroupCommunicator<group_data, inMesh>::migrateGroups(bool inc
             for (unsigned int ineigh = 0; ineigh < m_comm.m_n_unique_neigh; ineigh++)
                 n_send_groups[ineigh] = h_end.data[ineigh] - h_begin.data[ineigh];
 
-            MPI_Request req[2 * m_comm.m_n_unique_neigh];
-            MPI_Status stat[2 * m_comm.m_n_unique_neigh];
+            std::vector<MPI_Request> req(2 * m_comm.m_n_unique_neigh);
+            std::vector<MPI_Status> stat(2 * m_comm.m_n_unique_neigh);
 
             unsigned int nreq = 0;
 
@@ -635,7 +628,7 @@ void Communicator::GroupCommunicator<group_data, inMesh>::migrateGroups(bool inc
                           &req[nreq++]);
                 } // end neighbor loop
 
-            MPI_Waitall(nreq, req, stat);
+            MPI_Waitall(nreq, req.data(), stat.data());
 
             // sum up receive counts
             for (unsigned int ineigh = 0; ineigh < m_comm.m_n_unique_neigh; ineigh++)
@@ -796,18 +789,14 @@ void Communicator::GroupCommunicator<group_data, inMesh>::migrateGroups(bool inc
     }
 
 //! Mark ghost particles
-template<class group_data, bool inMesh>
-void Communicator::GroupCommunicator<group_data, inMesh>::markGhostParticles(
+template<class group_data>
+void Communicator::GroupCommunicator<group_data>::markGhostParticles(
     const GlobalVector<unsigned int>& plans,
     unsigned int mask)
     {
     if (m_gdata->getNGlobal())
         {
         unsigned int group_size = group_data::size;
-        if (inMesh)
-            {
-            group_size /= 2;
-            }
 
         ArrayHandle<typename group_data::members_t> h_groups(m_gdata->getMembersArray(),
                                                              access_location::host,
@@ -916,22 +905,18 @@ void Communicator::GroupCommunicator<group_data, inMesh>::markGhostParticles(
                         } // end inner loop over group members
                     }
                 } // end outer loop over group members
-            }     // end loop over groups
+            } // end loop over groups
         }
     }
 
-template<class group_data, bool inMesh>
-void Communicator::GroupCommunicator<group_data, inMesh>::exchangeGhostGroups(
+template<class group_data>
+void Communicator::GroupCommunicator<group_data>::exchangeGhostGroups(
     const GlobalArray<unsigned int>& plans,
     unsigned int mask)
     {
     if (m_gdata->getNGlobal())
         {
         unsigned int group_size = group_data::size;
-        if (inMesh)
-            {
-            group_size /= 2;
-            }
 
         // send plan for groups
         std::vector<unsigned int> group_plan(m_gdata->getN(), 0);
@@ -1396,10 +1381,8 @@ Communicator::~Communicator()
     MPI_Type_free(&m_mpi_pdata_element);
     }
 
-void Communicator::addMeshDefinition(std::shared_ptr<MeshDefinition> meshdef)
+void Communicator::updateMeshDefinition()
     {
-    m_meshdef = meshdef;
-
     m_meshbond_comm.setGroupData(m_meshdef->getMeshBondData());
     m_meshtriangle_comm.setGroupData(m_meshdef->getMeshTriangleData());
 
@@ -1412,6 +1395,11 @@ void Communicator::addMeshDefinition(std::shared_ptr<MeshDefinition> meshdef)
     m_meshdef->getMeshTriangleData()
         ->getGroupNumChangeSignal()
         .connect<Communicator, &Communicator::setMeshtrianglesChanged>(this);
+    }
+
+void Communicator::addMeshDefinition(std::shared_ptr<MeshDefinition> meshdef)
+    {
+    m_meshdef = meshdef;
     }
 
 void Communicator::initializeNeighborArrays()
@@ -3425,5 +3413,5 @@ void export_Communicator(pybind11::module& m)
     }
     } // end namespace detail
 
-    }  // end namespace hoomd
+    } // end namespace hoomd
 #endif // ENABLE_MPI

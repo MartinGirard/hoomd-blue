@@ -1,4 +1,4 @@
-# Copyright (c) 2009-2023 The Regents of the University of Michigan.
+# Copyright (c) 2009-2024 The Regents of the University of Michigan.
 # Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 r"""Anisotropic pair forces.
@@ -64,9 +64,6 @@ class Dipole(AnisotropicPair):
     Args:
         nlist (hoomd.md.nlist.NeighborList): Neighbor list
         default_r_cut (float): Default cutoff radius :math:`[\mathrm{length}]`.
-        mode (str): energy shifting/smoothing mode (ignored).
-
-            .. deprecated:: v3.1.0
 
     `Dipole` computes the (screened) interaction between pairs of
     particles with dipoles and electrostatic charges:
@@ -92,10 +89,6 @@ class Dipole(AnisotropicPair):
     Note:
        All units are documented electronic dipole moments. However, `Dipole`
        can also be used to represent magnetic dipoles.
-
-    Note:
-        `Dipole` accepts the ``mode`` parameter, but computes the same energy
-        regardless of the value of ``mode`` (starting with v3.0.0).
 
     Example::
 
@@ -130,8 +123,8 @@ class Dipole(AnisotropicPair):
     """
     _cpp_class_name = "AnisoPotentialPairDipole"
 
-    def __init__(self, nlist, default_r_cut=None, mode='none'):
-        super().__init__(nlist, default_r_cut, mode)
+    def __init__(self, nlist, default_r_cut=None):
+        super().__init__(nlist, default_r_cut, 'none')
         params = TypeParameter(
             'params', 'particle_types',
             TypeParameterDict(A=float, kappa=float, len_keys=2))
@@ -244,10 +237,6 @@ class ALJ(AnisotropicPair):
     Args:
         nlist (hoomd.md.nlist.NeighborList): Neighbor list
         default_r_cut (float): Default cutoff radius :math:`[length]`.
-        mode (`str`, optional): the energy shifting mode, defaults to "none".
-          Computes the same energy regardless of value passed.
-
-          .. deprecated:: v3.1.0
 
     `ALJ` computes the Lennard-Jones force between anisotropic particles as
     described in `Ramasubramani, V.  et al. 2020`_, using the formula:
@@ -442,8 +431,8 @@ class ALJ(AnisotropicPair):
         * ``vertices`` (`list` [`tuple` [`float`, `float`, `float`]],
           **required**) - The vertices of a convex polytope in 2 or 3
           dimensions. The third dimension in 2D is ignored.
-        * ``rounding_radii`` (`tuple` [`float`, `float`, `float`] or `float`,
-          **required**) - The semimajor axes of a rounding ellipsoid
+        * ``rounding_radii`` (`tuple` [`float`, `float`, `float`] or `float`)
+          - The semimajor axes of a rounding ellipsoid
           :math:`R_{\mathrm{rounding},i}`. If a single value is specified, the
           rounding ellipsoid is a sphere. Defaults to (0.0, 0.0, 0.0).
         * ``faces`` (`list` [`list` [`int`]], **required**) - The faces of the
@@ -524,8 +513,8 @@ class ALJ(AnisotropicPair):
     # parameter in C++, so use an instance level attribute instead that is
     # created in _attach based on the dimension of the associated simulation.
 
-    def __init__(self, nlist, default_r_cut=None, mode='none'):
-        super().__init__(nlist, default_r_cut, mode)
+    def __init__(self, nlist, default_r_cut=None):
+        super().__init__(nlist, default_r_cut, 'none')
         params = TypeParameter(
             'params', 'particle_types',
             TypeParameterDict(epsilon=float,
@@ -545,7 +534,7 @@ class ALJ(AnisotropicPair):
                                   to_type_converter((float, float, float)),
                                   preprocess=self._to_three_tuple),
                               len_keys=1,
-                              _defaults={'rounding_radii', (0.0, 0.0, 0.0)}))
+                              _defaults={'rounding_radii': (0.0, 0.0, 0.0)}))
 
         self._extend_typeparam((params, shape))
 

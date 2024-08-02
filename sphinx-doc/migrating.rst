@@ -1,15 +1,192 @@
-.. Copyright (c) 2009-2023 The Regents of the University of Michigan.
+.. Copyright (c) 2009-2024 The Regents of the University of Michigan.
 .. Part of HOOMD-blue, released under the BSD 3-Clause License.
 
+Migrating to the latest version
+===============================
+
+Migrating to HOOMD v4
+---------------------
+
+Breaking changes to existing functionalities
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For some functionalities, you will need to update your scripts to use a new API:
+
+* ``hoomd.md.dihedral.Harmonic``
+
+  * Use `hoomd.md.dihedral.Periodic`.
+
+* ``charges`` key in `Rigid.body <hoomd.md.constrain.Rigid.body>`.
+
+  * Pass charges to `Rigid.create_bodies <hoomd.md.constrain.Rigid.create_bodies>` or set in
+    the system state.
+
+* ``diameters`` key in `Rigid.body <hoomd.md.constrain.Rigid.body>`.
+
+  * Set diameters in system state.
+
+* ``hoomd.md.methods.NVE``.
+
+  * Use `hoomd.md.methods.ConstantVolume` with ``thermostat=None``.
+
+* ``hoomd.md.methods.NVT``.
+
+  * Use `hoomd.md.methods.ConstantVolume` with a `hoomd.md.methods.thermostats.MTTK` thermostat.
+
+* ``hoomd.md.methods.Berendsen``.
+
+  * Use `hoomd.md.methods.ConstantVolume` with a `hoomd.md.methods.thermostats.Berendsen`
+    thermostat.
+
+* ``hoomd.md.methods.NPH``.
+
+  * Use `hoomd.md.methods.ConstantPressure` with ``thermostat=None``.
+
+* ``hoomd.md.methods.NPT``.
+
+  * Use `hoomd.md.methods.ConstantPressure` with a `hoomd.md.methods.thermostats.MTTK` thermostat.
+
+* ``hoomd.write.GSD.log``.
+
+  * Use `hoomd.write.GSD.logger`.
+
+* ``hoomd.mesh.Mesh().triangles``.
+
+  * Use ``hoomd.mesh.Mesh().triangulation`` in `hoomd.mesh.Mesh` to define the mesh triangulation.
+
+* ``hoomd.md.pair.Gauss``.
+
+  * Use `hoomd.md.pair.Gaussian`.
+
+* ``hoomd.md.external.wall.Gauss``.
+
+  * Use `hoomd.md.external.wall.Gaussian`.
+
+* ``msg_file`` property and argument in `hoomd.device.Device`.
+
+  * Use `message_filename <hoomd.device.Device.message_filename>`.
+
+* ``sdf`` property of `hoomd.hpmc.compute.SDF`.
+
+  * Use `sdf_compression <hoomd.hpmc.compute.SDF.sdf_compression>`.
+
+* `hoomd.write.GSD` no longer writes ``particles/diameter`` by default.
+
+  * Set `write_diameter <hoomd.write.GSD.write_diameter>` as needed.
+
+* ``alpha`` property of `hoomd.md.methods.Langevin`, `hoomd.md.methods.Brownian`,
+  `hoomd.md.methods.OverdampedViscous`, `hoomd.md.methods.rattle.Langevin`,
+  `hoomd.md.methods.rattle.Brownian`, and `hoomd.md.methods.rattle.OverdampedViscous`.
+
+  * Use the ``gamma`` property.
+
+* The ``dynamic`` property and argument of `hoomd.write.GSD` no longer enforces ``'property'`` as
+  an always dynamic quantity. Users must include ``'property'``, ``'particles/position'`` and/or
+  ``'particles/orientation'`` as needed in ``dynamic`` lists that contain other fields.
+
+* `hoomd.write.GSD` aggressively buffers output. Call `hoomd.write.GSD.flush` to write the buffer
+  to disk when opening a file for reading that is still open for writing. There is **no need** to
+  call ``flush`` in normal workflows when files are closed and then opened later for reading.
+
+Removed functionalities
+^^^^^^^^^^^^^^^^^^^^^^^
+
+HOOMD-blue v4 removes functionalities deprecated in v3.x releases:
+
+* ``hoomd.md.pair.aniso.ALJ.mode`` parameter
+* ``hoomd.md.pair.aniso.Dipole.mode`` parameter
+* ``hoomd.device.GPU.memory_traceback`` parameter
+
+Reintroducing `hoomd.mpcd`
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+`hoomd.mpcd` was previously available in HOOMD 2, but it was not available in HOOMD 3 because its
+API needed to be significantly rewritten. It is reintroduced in HOOMD 4 with all classes and methods
+renamed to be consistent with the rest of HOOMD's API. The most significant changes for users are:
+
+* The way MPCD particle data is stored and initialized has changed. MPCD particles are now part of
+  `hoomd.State`, so HOOMD and MPCD particles need to be initialized together rather than separately.
+* After initialization, most objects now need to be attached to the :class:`hoomd.mpcd.Integrator`,
+  similarly to other features migrated from HOOMD 2 to HOOMD 3.
+* The `hoomd.mpcd.geometry.ParallelPlates` and `hoomd.mpcd.geometry.PlanarPore` streaming geometries
+  have been rotated to the *xy* plane from the *xz* plane.
+* MPCD particle sorting is not enabled by default but is still highly recommended for performance.
+  Users should explicitly create a `hoomd.mpcd.tune.ParticleSorter` and attach it to the
+  :class:`hoomd.mpcd.Integrator`.
+
+Please refer to the module-level documentation and examples for full details of the new API. Some
+common changes that you may need to make to your HOOMD 2 scripts are:
+
+.. list-table::
+    :header-rows: 1
+
+    * - Feature
+      - Change
+    * - Create snapshots using ``mpcd.data``
+      - Use `hoomd.Snapshot.mpcd`
+    * - Specify cell size using ``mpcd.data``
+      - The cell size is fixed at 1.0.
+    * - Initialize MPCD particles with ``mpcd.init.read_snapshot``
+      - Use `hoomd.Simulation.create_state_from_snapshot`
+    * - Initialize MPCD particles randomly with ``mpcd.init.make_random``
+      - Not currently supported
+    * - Initialize HOOMD particles from a file, then add MPCD particles through ``mpcd.init``.
+      - Use `hoomd.Snapshot.from_gsd_frame`, add the MPCD particles, then initialize as above
+    * - Bounce-back integration of HOOMD particles using ``mpcd.integrate``
+      - Use `hoomd.mpcd.methods.BounceBack` with a geometry from `hoomd.mpcd.geometry`
+    * - Bounce-back streaming of MPCD particles using ``mpcd.stream``
+      - Use `hoomd.mpcd.stream.BounceBack` with a geometry from `hoomd.mpcd.geometry`
+    * - Fill geometry with virtual particles using ``mpcd.fill``
+      - Use `hoomd.mpcd.fill.GeometryFiller` with a geometry from `hoomd.mpcd.geometry`
+    * - Change sorting period of automatically created ``system.sorter``
+      - Explicitly create a `hoomd.mpcd.tune.ParticleSorter` with desired period
+    * - Have HOOMD automatically validate my streaming geometry fits inside my box
+      - No longer performed. Users should make sure their geometries make sense
+    * - Have HOOMD automatically validate my particles are inside my streaming geometry
+      - Call `hoomd.mpcd.stream.BounceBack.check_mpcd_particles` directly
+
+For developers, the following are the most significant changes to be aware of:
+
+* The MPCD namespace is ``hoomd::mpcd``.
+* ``hoomd::mpcd::SystemData`` has been removed. Classes should accept ``hoomd::SystemDefinition``
+  instead and use ``SystemDefinition::getMPCDParticleData()``.
+* Force and geometry files have been renamed.
+* Bounce-back streaming methods are now templated on both geometries and forces, rather than using
+  polymorphism for the forces. This means that combinations of geometries and forces need to be
+  compiled when new classes are added. CMake can automatically generate the necessary files if new
+  geometries and forces are added to the appropriate lists. Python will automatically deduce the
+  right C++ class names if standard naming conventions are followed; otherwise, explicit
+  registration is required.
+* The virtual particle filler design has been refactored to enable other methods for virtual
+  particle filling. Fillers that derived from the previous ``hoomd::mpcd::VirtualParticleFiller``
+  should inherit from ``hoomd::mpcd::ManualVirtualParticleFiller`` instead.
+
+Compiling
+^^^^^^^^^
+
+* HOOMD-blue v4 no longer builds on macOS with ``ENABLE_GPU=on``.
+* Use the CMake options ``HOOMD_LONGREAL_SIZE`` and ``HOOMD_SHORTREAL_SIZE`` to control the floating
+  point precision of the calculations. These replace the ``SINGLE_PRECISION`` and
+  ``HPMC_MIXED_PRECISION`` options from v3.
+
+Components
+^^^^^^^^^^
+
+* Remove ``fix_cudart_rpath(_${COMPONENT_NAME})`` from your components ``CMakeLists.txt``
+* Use ``LongReal`` and ``ShortReal`` types in new code. ``Scalar`` will be removed in a future
+  release (v5 or later).
+* Replace any use of ``hpmc::OverlapReal`` with ``ShortReal``.
+* Remove ``needsDiameter`` and ``setDiameter`` methods in potential evaluator classes.
+
 Migrating to HOOMD v3
-=====================
+---------------------
 
 HOOMD v3 introduces many breaking changes for both users and developers
 in order to provide a cleaner Python interface, enable new functionalities, and
 move away from unsupported tools. This guide highlights those changes.
 
 Overview of API changes
------------------------
+^^^^^^^^^^^^^^^^^^^^^^^
 
 HOOMD v3 introduces a completely new API. All classes have been renamed to match
 PEP8 naming guidelines and have new or renamed parameters, methods, and
@@ -75,7 +252,7 @@ Here is a module level overview of features that have been moved or removed:
      - `hoomd.hpmc.external.user`
 
 Removed functionality
----------------------
+^^^^^^^^^^^^^^^^^^^^^
 
 HOOMD v3 removes old APIs, unused functionality, and features better served by other codes:
 
@@ -157,7 +334,7 @@ HOOMD v3 removes old APIs, unused functionality, and features better served by o
    * - ``f_list`` and ``t_list`` parameters to ``md.force.active``
      - Per-type ``active_force`` and ``active_torque``
    * - ``md.pair.SLJ``
-     - `md.pair.ExpandedLJ`
+     - `md.pair.ExpandedLJ` with `hoomd.md.pair.Pair.r_cut` set to ``r_cut(for delta=0) + delta``
 
 ``hoomd.cgcmm``:
 
@@ -182,7 +359,7 @@ HOOMD v3 removes old APIs, unused functionality, and features better served by o
      - ALJ pair potential in `hoomd.md.pair.aniso`.
 
 Not yet ported
---------------
+^^^^^^^^^^^^^^
 
 The following v2 functionalities have not yet been ported to the v3 API. They may be added in a
 future 3.x release:
@@ -198,7 +375,7 @@ contact the developers if you have an interest in porting these in a future rele
 
 
 Compiling
----------
+^^^^^^^^^
 
 * CMake 3.8 or newer is required to build HOOMD v3.0.
 * To compile with GPU support, use the option ``ENABLE_GPU=ON``.
@@ -213,7 +390,7 @@ Compiling
 * ``BUILD_JIT`` is replaced with ``ENABLE_LLVM``.
 
 Components
-----------
+^^^^^^^^^^
 
 * HOOMD now uses native CUDA support in CMake. Use ``CMAKE_CUDA_COMPILER`` to
   specify a specific ``nvcc`` or ``hipcc``. Plugins will require updates to

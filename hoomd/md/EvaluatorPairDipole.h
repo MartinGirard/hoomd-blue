@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 // $Id$
@@ -75,12 +75,12 @@ class EvaluatorPairDipole
             pybind11::dict v;
             v["A"] = A;
             v["kappa"] = kappa;
-            return std::move(v);
+            return v;
             }
 
 #endif
         }
-#ifdef SINGLE_PRECISION
+#if HOOMD_LONGREAL_SIZE == 32
         __attribute__((aligned(8)));
 #else
         __attribute__((aligned(16)));
@@ -136,15 +136,9 @@ class EvaluatorPairDipole
                                    Scalar4& _quat_j,
                                    Scalar _rcutsq,
                                    const param_type& _params)
-        : dr(_dr), rcutsq(_rcutsq), q_i(0), q_j(0), quat_i(_quat_i),
-          quat_j(_quat_j), mu_i {0, 0, 0}, mu_j {0, 0, 0}, A(_params.A), kappa(_params.kappa)
+        : dr(_dr), rcutsq(_rcutsq), q_i(0), q_j(0), quat_i(_quat_i), quat_j(_quat_j),
+          mu_i {0, 0, 0}, mu_j {0, 0, 0}, A(_params.A), kappa(_params.kappa)
         {
-        }
-
-    //! uses diameter
-    HOSTDEVICE static bool needsDiameter()
-        {
-        return false;
         }
 
     //! Whether the pair potential uses shape.
@@ -170,12 +164,6 @@ class EvaluatorPairDipole
         {
         return false;
         }
-
-    //! Accept the optional diameter values
-    /*! \param di Diameter of particle i
-        \param dj Diameter of particle j
-    */
-    HOSTDEVICE void setDiameter(Scalar di, Scalar dj) { }
 
     //! Accept the optional shape values
     /*! \param shape_i Shape of particle i
@@ -245,7 +233,7 @@ class EvaluatorPairDipole
 
         bool dipole_i_interactions = (mu_i != vec3<Scalar>(0, 0, 0));
         bool dipole_j_interactions = (mu_j != vec3<Scalar>(0, 0, 0));
-        bool dipole_interactions = dipole_j_interactions && dipole_j_interactions;
+        bool dipole_interactions = dipole_i_interactions && dipole_j_interactions;
         // dipole-dipole
         if (dipole_interactions)
             {

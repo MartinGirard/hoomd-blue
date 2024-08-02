@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 /*!
@@ -26,27 +26,28 @@ class PYBIND11_EXPORT SRDCollisionMethod : public mpcd::CollisionMethod
     {
     public:
     //! Constructor
-    SRDCollisionMethod(std::shared_ptr<mpcd::SystemData> sysdata,
+    SRDCollisionMethod(std::shared_ptr<SystemDefinition> sysdef,
                        unsigned int cur_timestep,
                        unsigned int period,
                        int phase,
-                       uint16_t seed,
-                       std::shared_ptr<mpcd::CellThermoCompute> thermo);
+                       Scalar angle);
 
     //! Destructor
     virtual ~SRDCollisionMethod();
 
-    //! Get the MPCD rotation angle
-    double getRotationAngle() const
+    void setCellList(std::shared_ptr<mpcd::CellList> cl);
+
+    //! Get the MPCD rotation angles
+    Scalar getRotationAngle() const
         {
         return m_angle;
         }
 
     //! Set the MPCD rotation angle
     /*!
-     * \param angle MPCD rotation angle in radians
+     * \param angle MPCD rotation angle in degrees
      */
-    void setRotationAngle(double angle)
+    void setRotationAngle(Scalar angle)
         {
         m_angle = angle;
         }
@@ -63,16 +64,16 @@ class PYBIND11_EXPORT SRDCollisionMethod : public mpcd::CollisionMethod
         return m_factors;
         }
 
-    //! Set the temperature and enable the thermostat
+    //! Get the temperature
+    std::shared_ptr<Variant> getTemperature() const
+        {
+        return m_T;
+        }
+
+    //! Set the temperature
     void setTemperature(std::shared_ptr<Variant> T)
         {
         m_T = T;
-        }
-
-    //! Unset the temperature
-    void unsetTemperature()
-        {
-        m_T = std::shared_ptr<Variant>();
         }
 
     //! Get the requested thermo flags
@@ -88,7 +89,7 @@ class PYBIND11_EXPORT SRDCollisionMethod : public mpcd::CollisionMethod
     protected:
     std::shared_ptr<mpcd::CellThermoCompute> m_thermo; //!< Cell thermo
     GPUVector<double3> m_rotvec;                       //!< MPCD rotation vectors
-    double m_angle;                                    //!< MPCD rotation angle (radians)
+    Scalar m_angle;                                    //!< MPCD rotation angle (degrees)
 
     std::shared_ptr<Variant> m_T; //!< Temperature for thermostat
     GPUVector<double> m_factors;  //!< Cell-level rescale factors
@@ -101,14 +102,13 @@ class PYBIND11_EXPORT SRDCollisionMethod : public mpcd::CollisionMethod
 
     //! Apply rotation matrix to velocities
     virtual void rotate(uint64_t timestep);
+
+    //! Attach callback signals
+    void attachCallbacks();
+
+    //! Detach callback signals
+    void detachCallbacks();
     };
-
-namespace detail
-    {
-//! Export SRDCollisionMethod to python
-void export_SRDCollisionMethod(pybind11::module& m);
-    } // end namespace detail
-
-    }  // end namespace mpcd
-    }  // end namespace hoomd
+    } // end namespace mpcd
+    } // end namespace hoomd
 #endif // MPCD_SRD_COLLISION_METHOD_H_

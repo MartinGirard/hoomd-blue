@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2023 The Regents of the University of Michigan.
+// Copyright (c) 2009-2024 The Regents of the University of Michigan.
 // Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 #include "CellList.h"
@@ -7,6 +7,8 @@
 #include "Communicator.h"
 #include "hoomd/Communicator.h"
 #endif // ENABLE_MPI
+#include "hoomd/RNGIdentifiers.h"
+#include "hoomd/RandomNumbers.h"
 
 /*!
  * \file mpcd/CellList.cc
@@ -15,12 +17,11 @@
 
 namespace hoomd
     {
-mpcd::CellList::CellList(std::shared_ptr<SystemDefinition> sysdef,
-                         std::shared_ptr<mpcd::ParticleData> mpcd_pdata)
-    : Compute(sysdef), m_mpcd_pdata(mpcd_pdata), m_cell_size(1.0), m_cell_np_max(4),
-      m_cell_np(m_exec_conf), m_cell_list(m_exec_conf), m_embed_cell_ids(m_exec_conf),
-      m_conditions(m_exec_conf), m_needs_compute_dim(true), m_particles_sorted(false),
-      m_virtual_change(false)
+mpcd::CellList::CellList(std::shared_ptr<SystemDefinition> sysdef, Scalar cell_size, bool shift)
+    : Compute(sysdef), m_mpcd_pdata(m_sysdef->getMPCDParticleData()), m_cell_size(cell_size),
+      m_cell_np_max(4), m_cell_np(m_exec_conf), m_cell_list(m_exec_conf),
+      m_embed_cell_ids(m_exec_conf), m_conditions(m_exec_conf), m_needs_compute_dim(true),
+      m_particles_sorted(false), m_virtual_change(false)
     {
     assert(m_mpcd_pdata);
     m_exec_conf->msg->notice(5) << "Constructing MPCD CellList" << std::endl;
@@ -29,6 +30,7 @@ mpcd::CellList::CellList(std::shared_ptr<SystemDefinition> sysdef,
     m_cell_dim = make_uint3(0, 0, 0);
     m_global_cell_dim = make_uint3(0, 0, 0);
 
+    m_enable_grid_shift = shift;
     m_grid_shift = make_scalar3(0.0, 0.0, 0.0);
     m_max_grid_shift = 0.5 * m_cell_size;
     m_origin_idx = make_int3(0, 0, 0);
@@ -39,13 +41,6 @@ mpcd::CellList::CellList(std::shared_ptr<SystemDefinition> sysdef,
     m_decomposition = m_pdata->getDomainDecomposition();
     m_num_extra = 0;
     m_cover_box = m_pdata->getBox();
-
-    if (m_sysdef->isDomainDecomposed())
-        {
-        auto comm_weak = m_sysdef->getCommunicator();
-        assert(comm_weak.lock());
-        m_comm = comm_weak.lock();
-        }
 #endif // ENABLE_MPI
 
     m_mpcd_pdata->getSortSignal().connect<mpcd::CellList, &mpcd::CellList::sort>(this);
@@ -89,12 +84,20 @@ void mpcd::CellList::compute(uint64_t timestep)
 
     if (peekCompute(timestep))
         {
+        // ensure grid is shifted
+        drawGridShift(timestep);
+
 #ifdef ENABLE_MPI
         // exchange embedded particles if necessary
         if (m_sysdef->isDomainDecomposed() && needsEmbedMigrate(timestep))
             {
-            m_comm->forceMigrate();
-            m_comm->communicate(timestep);
+            auto comm = m_sysdef->getCommunicator().lock();
+            if (!comm)
+                {
+                throw std::runtime_error("Embedded particle communicator needed but not set");
+                }
+            comm->forceMigrate();
+            comm->communicate(timestep);
             }
 #endif // ENABLE_MPI
 
@@ -485,9 +488,9 @@ void mpcd::CellList::checkDomainBoundaries()
             if (overlap_error)
                 {
                 m_exec_conf->msg->error()
-                    << "mpcd: communication grid does not overlap. "
-                    << "Expected to receive cell " << err_pair[1] << " from rank " << recv_neighbor
-                    << ", but got cell " << err_pair[0] << "." << std::endl;
+                    << "mpcd: communication grid does not overlap. " << "Expected to receive cell "
+                    << err_pair[1] << " from rank " << recv_neighbor << ", but got cell "
+                    << err_pair[0] << "." << std::endl;
                 }
             throw std::runtime_error("Error setting up MPCD cell list");
             }
@@ -856,6 +859,36 @@ void mpcd::CellList::resetConditions()
     m_conditions.resetFlags(make_uint3(0, 0, 0));
     }
 
+/*!
+ * \param timestep Timestep to set shifting for
+ *
+ * \post The MPCD cell list has its grid shift set for \a timestep.
+ *
+ * If grid shifting is enabled, three uniform random numbers are drawn using
+ * the Mersenne twister generator. (In two dimensions, only two numbers are drawn.)
+ *
+ * If grid shifting is disabled, a zero vector is instead set.
+ */
+void mpcd::CellList::drawGridShift(uint64_t timestep)
+    {
+    if (m_enable_grid_shift)
+        {
+        uint16_t seed = m_sysdef->getSeed();
+
+        // PRNG using seed and timestep as seeds
+        hoomd::RandomGenerator rng(hoomd::Seed(hoomd::RNGIdentifier::MPCDCellList, timestep, seed),
+                                   hoomd::Counter());
+
+        // draw shift variables from uniform distribution
+        hoomd::UniformDistribution<Scalar> uniform(-m_max_grid_shift, m_max_grid_shift);
+        Scalar3 shift;
+        shift.x = uniform(rng);
+        shift.y = uniform(rng);
+        shift.z = (m_sysdef->getNDimensions() == 3) ? uniform(rng) : Scalar(0.0);
+        setGridShift(shift);
+        }
+    }
+
 void mpcd::CellList::getCellStatistics() const
     {
     unsigned int min_np(0xffffffff), max_np(0);
@@ -930,14 +963,19 @@ const int3 mpcd::CellList::wrapGlobalCell(const int3& cell) const
     return wrap;
     }
 
-void mpcd::detail::export_CellList(pybind11::module& m)
+namespace mpcd
+    {
+namespace detail
+    {
+void export_CellList(pybind11::module& m)
     {
     pybind11::class_<mpcd::CellList, Compute, std::shared_ptr<mpcd::CellList>>(m, "CellList")
-        .def(pybind11::init<std::shared_ptr<SystemDefinition>,
-                            std::shared_ptr<mpcd::ParticleData>>())
+        .def(pybind11::init<std::shared_ptr<SystemDefinition>, Scalar, bool>())
         .def_property("cell_size", &mpcd::CellList::getCellSize, &mpcd::CellList::setCellSize)
-        .def("setEmbeddedGroup", &mpcd::CellList::setEmbeddedGroup)
-        .def("removeEmbeddedGroup", &mpcd::CellList::removeEmbeddedGroup);
+        .def_property("shift",
+                      &mpcd::CellList::isGridShifting,
+                      &mpcd::CellList::enableGridShifting);
     }
-
+    } // namespace detail
+    } // namespace mpcd
     } // end namespace hoomd

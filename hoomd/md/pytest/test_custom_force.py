@@ -1,4 +1,4 @@
-# Copyright (c) 2009-2023 The Regents of the University of Michigan.
+# Copyright (c) 2009-2024 The Regents of the University of Michigan.
 # Part of HOOMD-blue, released under the BSD 3-Clause License.
 
 import pytest
@@ -40,12 +40,12 @@ def force_simulation_factory(simulation_factory):
 
     def make_sim(force_obj, snapshot=None, domain_decomposition=None):
         sim = simulation_factory(snapshot, domain_decomposition)
-        npt = md.methods.NPT(hoomd.filter.All(),
-                             kT=1,
-                             tau=1,
-                             S=1,
-                             tauS=1,
-                             couple="none")
+        thermostat = hoomd.md.methods.thermostats.MTTK(kT=1.0, tau=1.0)
+        npt = md.methods.ConstantPressure(hoomd.filter.All(),
+                                          S=1,
+                                          tauS=1,
+                                          couple="none",
+                                          thermostat=thermostat)
         integrator = md.Integrator(dt=0.005, forces=[force_obj], methods=[npt])
         sim.operations.integrator = integrator
         return sim
@@ -113,6 +113,63 @@ def test_simulation(local_force_names, force_simulation_factory,
             npt.assert_allclose(torques, 23)
             for i in range(6):
                 npt.assert_allclose(virials[:, i], i)
+
+
+class ForceAsFunctionOfTag(md.force.Custom):
+
+    def __init__(self):
+        super().__init__(aniso=True)
+
+    def set_forces(self, timestep):
+        with self.cpu_local_force_arrays as force_arrays:
+            with self._state.cpu_local_snapshot as local_snapshot:
+                tags = local_snapshot.particles.tag
+                force_arrays.force[:] = np.stack((tags * 1, tags * 2, tags * 3),
+                                                 axis=-1)
+                energy = local_snapshot.particles.tag.astype(np.float64) * -10.0
+                force_arrays.potential_energy[:] = energy
+                tags_float = tags.astype(np.float64)
+                force_arrays.torque[:] = np.stack(
+                    (tags_float * -3.0, tags_float * -2.0, tags_float * -1.0),
+                    axis=-1)
+                if force_arrays.virial.shape[0] != 0:
+                    force_arrays.virial[:] = np.stack((
+                        tags_float * 1.0,
+                        tags_float * -2.0,
+                        tags_float * -3.0,
+                        tags_float * 4.0,
+                        tags_float * -5.0,
+                        tags_float * 6.0,
+                    ),
+                                                      axis=-1)
+
+
+@pytest.mark.cpu
+def test_force_array_ordering(force_simulation_factory,
+                              lattice_snapshot_factory):
+    """Make sure values in force arrays are returned in correct order."""
+    snap = lattice_snapshot_factory()
+    custom_force = ForceAsFunctionOfTag()
+    sim = force_simulation_factory(custom_force, snap)
+    sim.run(1)
+
+    forces = custom_force.forces
+    energies = custom_force.energies
+    torques = custom_force.torques
+    virials = custom_force.virials
+    indices = np.arange(sim.state.N_particles)
+    if sim.device.communicator.rank == 0:
+        npt.assert_array_equal(energies, np.arange(sim.state.N_particles) * -10)
+        npt.assert_array_equal(
+            forces, np.stack((indices * 1, indices * 2, indices * 3), axis=-1))
+        npt.assert_array_equal(
+            torques,
+            np.stack((indices * -3, indices * -2, indices * -1), axis=-1))
+        npt.assert_array_equal(
+            virials,
+            np.stack((indices * 1, indices * -2, indices * -3, indices * 4,
+                      indices * -5, indices * 6),
+                     axis=-1))
 
 
 class MyPeriodicField(md.force.Custom):
@@ -356,12 +413,12 @@ def test_failure_with_cpu_device_and_gpu_buffer():
     sim = hoomd.Simulation(device)
     sim.create_state_from_snapshot(snap)
     custom_force = MyForce('gpu_local_force_arrays')
-    npt = md.methods.NPT(hoomd.filter.All(),
-                         kT=1,
-                         tau=1,
-                         S=1,
-                         tauS=1,
-                         couple="none")
+    thermostat = hoomd.md.methods.thermostats.MTTK(kT=1.0, tau=1.0)
+    npt = md.methods.ConstantPressure(hoomd.filter.All(),
+                                      thermostat=thermostat,
+                                      S=1,
+                                      tauS=1,
+                                      couple="none")
     integrator = md.Integrator(dt=0.005, forces=[custom_force], methods=[npt])
     sim.operations.integrator = integrator
     with pytest.raises(RuntimeError):
