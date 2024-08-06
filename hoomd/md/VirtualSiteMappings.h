@@ -19,165 +19,101 @@
 namespace hoomd::md {
 
     struct VSMap {
-        static constexpr unsigned int n_sites = 0;
+        static constexpr unsigned char length = 0;
         struct param_type{};
-
-        VSMap( uint64_t _site): site(_site) {}
-/*
- * The base VSMap should never be used as template param, only its derived structs
- * Derived types should implement the following quantities:
- *
-        void decomposeForce(Scalar4* forces, Scalar4* net_forces);
-
-        void decomposeVirial(Scalar* virial,
-                             Scalar* net_virial,
-                             uint64_t virial_pitch,
-                             uint64_t net_virial_pitch,
-                             Scalar4* postype,
-                             Scalar4* forces);
-
-        void reconstructSite(Scalar4 *position_array);
-*/
-        const uint64_t site;
+        struct index_type{};
     };
 
 namespace virtualsites {
 
-#ifdef __HIPCC__
-    __forceinline__ DEVICE void atAddScalar4(Scalar4* x, const Scalar4& y){
-        atomicAdd(&(x->x), y.x);
-        atomicAdd(&(x->y), y.y);
-        atomicAdd(&(x->z), y.z);
-        atomicAdd(&(x->w), y.w);
-    }
-
-    template<std::size_t N>
-    inline void linearSum(Scalar4* ptr,
-                   const Scalar4& f,
-                   const std::array<uint64_t, N>& indices,
-                   const std::array<Scalar, N>& coefficients){
-    for(unsigned char s = 0; s < N; s++){
-        atAddScalar4(&(ptr[indices[s]]), f * coefficients[s]);
-        }
-    }
-#endif
-    template<std::size_t N>
-    inline void linearReconstruction(Scalar4* pos,
-                              const uint64_t site,
-                              const std::array<uint64_t, N>& indices,
-                              const std::array<Scalar, N>& coefficients){
-        Scalar3 site_pos = {0., 0., 0.};
-        for(unsigned char s = 0; s < N; s++){
-        const auto& ibase = pos[indices[s]];
-        site_pos += make_scalar3(ibase.x, ibase.y, ibase.z) * coefficients[s];
-        }
-        pos[site].x = site_pos.x;
-        pos[site].y = site_pos.y;
-        pos[site].z = site_pos.z;
-    }
-
-    inline void DEVICE projectVirial(Scalar* virial,
-                       Scalar* net_virial,
-                       uint64_t virial_pitch,
-                       uint64_t net_virial_pitch,
-                       uint64_t source,
-                       uint64_t target,
-                       Scalar3 f,
-                       Scalar3 dr_space){
-        Scalar virialxx = net_virial[0 * net_virial_pitch + source];
-        Scalar virialxy = net_virial[1 * net_virial_pitch + source];
-        Scalar virialxz = net_virial[2 * net_virial_pitch + source];
-        Scalar virialyy = net_virial[3 * net_virial_pitch + source];
-        Scalar virialyz = net_virial[4 * net_virial_pitch + source];
-        Scalar virialzz = net_virial[5 * net_virial_pitch + source];
-
-        // subtract intra-body virial prt
-#ifndef __HIPCC__
-        virial[0 * virial_pitch + target] += virialxx - f.x * dr_space.x;
-        virial[1 * virial_pitch + target] += virialxy - f.x * dr_space.y;
-        virial[2 * virial_pitch + target] += virialxz - f.x * dr_space.z;
-        virial[3 * virial_pitch + target] += virialyy - f.y * dr_space.y;
-        virial[4 * virial_pitch + target] += virialyz - f.y * dr_space.z;
-        virial[5 * virial_pitch + target] += virialzz - f.z * dr_space.z;
-#else
-        atomicAdd(virial + 0 * virial_pitch + target, virialxx - f.x * dr_space.x);
-        atomicAdd(virial + 1 * virial_pitch + target, virialxy - f.x * dr_space.y);
-        atomicAdd(virial + 2 * virial_pitch + target, virialxz - f.x * dr_space.z);
-        atomicAdd(virial + 3 * virial_pitch + target, virialyy - f.y * dr_space.y);
-        atomicAdd(virial + 4 * virial_pitch + target, virialyz - f.y * dr_space.z);
-        atomicAdd(virial + 5 * virial_pitch + target, virialzz - f.z * dr_space.z);
-#endif
-    }
-
-    template<std::size_t N>
-    inline void projectLinearVirial(Scalar* virial,
-                             Scalar* net_virial,
-                             uint64_t virial_pitch,
-                             uint64_t net_virial_pitch,
-                             Scalar4* postype,
-                             Scalar4* forces,
-                             uint64_t site,
-                             const std::array<uint64_t, N>& indices,
-                             const std::array<Scalar, N>& coefficients){
-        const auto pos_site = postype[site];
-        Scalar3 r_site = make_scalar3(pos_site.x, pos_site.y, pos_site.z);
-        for(unsigned char s = 0; s < N; s++){
-            const auto& f = forces[indices[s]];
-            const auto pos = postype[indices[s]];
-            const auto r = make_scalar3(pos.x, pos.y, pos.z);
-            projectVirial(virial, net_virial, virial_pitch, net_virial_pitch, site, indices[s],
-                          make_scalar3(f.x, f.y, f.z) * coefficients[s], r - r_site);
-        }
-    }
-
-    struct Type2 : public VSMap{
+    template<unsigned char N>
+    struct Linear : VSMap{
+        static constexpr unsigned char length = N;
         struct param_type{
-            Scalar a;
-        };
-        static constexpr unsigned int n_sites = 2;
-
-        Type2(param_type params, std::array<uint64_t, n_sites> &_indices, uint64_t _site):
-        VSMap(_site), a(params.a), indices(_indices){}
-
-        void reconstructSite(Scalar4* positions){
-            linearReconstruction(positions, site, indices, {1-a, a});
-        }
-
-        void decomposeForce(Scalar4* forces, Scalar4* net_forces){
-            // since a non-virtual particle may be used for construction of multiple
-            // virtual sites, we would have to use an atomic op. CPU is serial wrt
-            // this particular op.
-            Scalar4 vsite_force = net_forces[site];
-#ifndef __HIPCC__
-            forces[indices[0]] += vsite_force * (1-a);
-            forces[indices[1]] += vsite_force * a;
-#else
-            linearSum(forces, vsite_force, indices, {(1-a), a});
-#endif
-            net_forces[site] = make_scalar4(0., 0., 0., 0.);
-        }
-
-        void decomposeVirial(Scalar* virial,
-                             Scalar* net_virial,
-                             uint64_t virial_pitch,
-                             uint64_t net_virial_pitch,
-                             Scalar4* postype,
-                             Scalar4* forces) {
-            projectLinearVirial(virial,
-                                net_virial,
-                                virial_pitch,
-                                net_virial_pitch,
-                                postype,
-                                forces,
-                                site,
-                                indices,
-                                {1-a, a});
+            Scalar coefficient[N];
         };
 
-    protected:
-        Scalar a;
-        const std::array<uint64_t, n_sites> indices;
+        struct index_type{
+            uint64_t indices[N];
+        };
+
+        inline HOSTDEVICE Scalar3 reconstruct(Scalar4* postypes){
+            Scalar3 pos{0., 0., 0.};
+
+            for(auto i = 0; i < N; i++){
+                Scalar4 postype = postypes[indices.indices[i]];
+                Scalar3 xyz{postype.x, postype.y, postype.z};
+                pos += xyz * params.coefficient[i];
+            }
+            return pos;
+        }
+
+        template<bool compute_virial>
+        inline HOSTDEVICE void project(
+                Scalar4* postype,
+                Scalar4* net_forces,
+                Scalar* net_virial,
+                uint64_t net_virial_pitch,
+                uint64_t source
+                ){
+            Scalar virial[6] = {
+                    net_virial[0 * net_virial_pitch + source],
+                    net_virial[1 * net_virial_pitch + source],
+                    net_virial[2 * net_virial_pitch + source],
+                    net_virial[3 * net_virial_pitch + source],
+                    net_virial[4 * net_virial_pitch + source],
+                    net_virial[5 * net_virial_pitch + source]
+            };
+
+            Scalar4 site_postype = postype[source];
+
+            for(auto i = 0; i < N; i++){
+                const auto id = indices.indices[N];
+                const auto F = net_forces[source] * params.coefficient[N];
+                net_forces[id] += F;
+
+                const auto j_postype = postype[id];
+
+                Scalar3 dr{
+                    site_postype.x - j_postype.x,
+                    site_postype.y - j_postype.y,
+                    site_postype.z - j_postype.z
+                };
+
+                if(compute_virial){
+                    net_virial[0 * net_virial_pitch + id] += virial[0] - F.x * dr.x;
+                    net_virial[1 * net_virial_pitch + id] += virial[1] - F.x * dr.y;
+                    net_virial[2 * net_virial_pitch + id] += virial[2] - F.x * dr.z;
+                    net_virial[3 * net_virial_pitch + id] += virial[3] - F.y * dr.y;
+                    net_virial[4 * net_virial_pitch + id] += virial[4] - F.y * dr.z;
+                    net_virial[5 * net_virial_pitch + id] += virial[5] - F.z * dr.z;
+                }
+            }
+
+            // zero out other contributions
+            net_forces[source] = {0., 0., 0., 0.};
+            if(compute_virial){
+                net_virial[0 * net_virial_pitch + source] = 0;
+                net_virial[1 * net_virial_pitch + source] = 0;
+                net_virial[2 * net_virial_pitch + source] = 0;
+                net_virial[3 * net_virial_pitch + source] = 0;
+                net_virial[4 * net_virial_pitch + source] = 0;
+                net_virial[5 * net_virial_pitch + source] = 0;
+            }
+
+        }
+
+        Linear<N>(index_type indices_, param_type params_) : indices(indices_), params(params_){}
+
+        index_type indices;
+        param_type params;
     };
+
+
+    struct Linear2 : Linear<2>{};
+    struct Linear3 : Linear<3>{};
+    struct Linear4 : Linear<4>{};
+
 }
 
 }
