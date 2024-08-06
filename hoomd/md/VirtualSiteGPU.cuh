@@ -25,6 +25,7 @@ namespace hoomd::md::kernel {
         Scalar4* d_postype;
         unsigned int* d_mol_list;
         Index2D indexer;
+        uint64_t N;
     };
 
     struct VirtualSiteDecomposeKernelArgs{
@@ -36,6 +37,7 @@ namespace hoomd::md::kernel {
         uint64_t net_virial_pitch;
         unsigned int* d_mol_list;
         Index2D indexer;
+        uint64_t N;
     };
 
 
@@ -52,15 +54,19 @@ namespace hoomd::md::kernel {
         if(site >= moleculeIndexer.getH())
             return;
 
-        auto constexpr numel_base = Mapping::n_sites;
-        const auto site_index = moleculeIndexer(numel_base, site);
+        auto constexpr site_length = Mapping::length;
+        const auto site_index = moleculeIndexer(site_length, site);
         if(site_index >= N) // virtual particle is not local
             return;
 
-        std::array<uint64_t, numel_base> indices;
-        for(unsigned char s = 0; s < numel_base; s++)
-            indices[s] = d_molecule_list[moleculeIndexer(s, site)];
-        Mapping virtual_site(param, indices, d_molecule_list[site_index]);
+        // the contents of the molecules should directly be mappable to the
+        // index structure
+        typename Mapping::index_type indices;
+        for(unsigned char s = 0; s < site_length; s++){
+            indices.indices[s] = d_molecule_list[moleculeIndexer(s, site)];
+        }
+
+        Mapping virtual_site(indices, param);
         virtual_site.reconstructSite(postype);
     }
 
@@ -80,26 +86,35 @@ namespace hoomd::md::kernel {
         if(site >= moleculeIndexer.getH())
             return;
 
-        auto constexpr numel_base = Mapping::n_sites;
-        const auto site_index = moleculeIndexer(numel_base, site);
-        if(site_index >= N) // virtual particle is not local
-            return;
+        auto constexpr site_length = Mapping::length;
+        const auto site_index = moleculeIndexer(site_length, site);
 
-        std::array<uint64_t, numel_base> indices;
-        for(unsigned char s = 0; s < numel_base; s++)
-            indices[s] = d_molecule_list[moleculeIndexer(s, site)];
-        Mapping virtual_site(param, indices, d_molecule_list[site_index]);
-        // decomposeForces set the net_force on the virtual particle to 0, so the virial needs to be
-        // decomposed first
-        if(compute_virial){
-            virtual_site.decomposeVirial(virial,
-                                         net_virial,
-                                         virial_pitch,
-                                         net_virial_pitch,
-                                         postype,
-                                         net_forces);
+        if(site_index >= N) { // virtual particle is not local; we just zero forces / virials and return
+            net_forces[site_index] = {0., 0., 0., 0.};
+            if(compute_virial){
+                for(auto i = 0; i <6; i++)
+                    net_virial[i * net_virial_pitch + site_index] = 0;
+            }
+            return;
         }
-        virtual_site.decomposeForces(forces, net_forces);
+
+
+        typename Mapping::index_type indices;
+        for(unsigned char s = 0; s < site_length; s++){
+            indices.indices[s] = d_molecule_list[moleculeIndexer(s, site)];
+        }
+
+        Mapping virtual_site(indices, param);
+
+        virtual_site.project(
+                postype,
+                forces,
+                net_forces,
+                virial,
+                net_virial,
+                virial_pitch,
+                net_virial_pitch
+                );
     }
 
 #endif
